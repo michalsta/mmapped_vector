@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <cstring> // for std::memcpy
+#include <mutex>
 
 #if defined(__APPLE__) || defined(__MACH__)
     #define IS_MACOS 1
@@ -14,12 +15,7 @@
 #endif
 
 
-std::string mmapped_vector_get_error_message(const std::string& operation) {
-    return operation + " failed: " + std::strerror(errno) +
-           " (errno: " + std::to_string(errno) + ")";
-}
-
-template <typename T>
+template <typename T, bool thread_safe = false>
 class MmappedVector {
     static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable for safe memory movement");
 
@@ -27,8 +23,9 @@ private:
     std::string filename;
     int fd;
     void* addr;
-    size_t element_count;
+    std::conditional_t<thread_safe, std::atomic<size_t>, size_t> element_count;
     size_t allocated_size;
+    typename std::enable_if<thread_safe, std::mutex>::type realloc_guard;
 
 public:
     // Default constructor: Creates an empty vector with initial capacity
@@ -127,6 +124,7 @@ private:
     void ensure_capacity(size_t new_capacity);
     void resize_mapping(size_t new_capacity) {
         if (new_capacity != allocated_size) {
+
             try {
                 if (fd != -1) {
                     if (ftruncate(fd, sizeof(T) * new_capacity) == -1) {
@@ -279,13 +277,19 @@ void MmappedVector<T>::emplace_back(Args&&... args) {
     ++element_count;
 }
 
-template <typename T>
-void MmappedVector<T>::pop_back() {
-    if (empty()) {
+template <typename T, bool thread_safe>
+void MmappedVector<T, thread_safe>::pop_back() {
+
+    size_t current_count;
+    if constexpr (thread_safe) {
+        current_count = element_count.fetch_sub(1, std::memory_order_relaxed);
+    } else {
+        current_count = --element_count;
+    }
+    if (current_count == 0) {
         throw std::out_of_range("Vector is empty");
     }
-    --element_count;
-    static_cast<T*>(addr)[element_count].~T();
+    static_cast<T*>(addr)[current_count].~T();
 }
 
 template <typename T>
