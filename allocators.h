@@ -13,6 +13,9 @@
 #include <string>
 #include <sys/mman.h>
 #include <mutex>
+#include <variant>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include "error_handling.h"
 
@@ -36,6 +39,7 @@ public:
     size_t get_size() const;
     size_t get_capacity() const;
     T* get_ptr() const;
+    
 };
 
 template<typename T, bool thread_safe> inline
@@ -70,18 +74,29 @@ template <typename T, bool thread_safe>
 MmapAllocator<T, thread_safe>::MmapAllocator() : MmapAllocator<T, thread_safe>(MAP_ANONYMOUS | MAP_SHARED) {};
 
 
-template <typename T>
-MmapAllocator<T, false>::MmapAllocator(int flags) : Allocator<T, false>() {
-    this->ptr = static_cast<T*>(mmap(nullptr, 16 * sizeof(T), PROT_READ | PROT_WRITE, flags, -1, 0));
-    if (this->ptr == MAP_FAILED) {
-        throw std::runtime_error("MmapAllocator: mmap failed: " + mmapped_vector::get_error_message("mmap"));
+template <typename T, bool thread_safe>
+MmapAllocator<T, thread_safe>::MmapAllocator(int flags) : Allocator<T, thread_safe>() {
+    auto fun_body[&]()
+    {
+        this->ptr = static_cast<T*>(mmap(nullptr, 16 * sizeof(T), PROT_READ | PROT_WRITE, flags, -1, 0));
+        if (this->ptr == MAP_FAILED) {
+            throw std::runtime_error("MmapAllocator: mmap failed: " + mmapped_vector::get_error_message("mmap"));
+        }
+        this->size = 0;
+        this->capacity = 16;
     }
-    this->size = 0;
-    this->capacity = 16;
+
+    if constexpr(thread_safe)
+    {
+        std::lock_guard<std::mutex>(guard)
+        fun_body()
+    }
+    else
+        fun_body();
 }
 
 template <typename T, bool thread_safe>
-MmapAllocator<T, true>::MmapAllocator(int flags) : Allocator<T, true>() {
+MmapAllocator<T, thread_safe>::MmapAllocator(int flags) : Allocator<T, thread_safe>() {
     std::scoped_lock lock(this->guard);
     this->ptr = static_cast<T*>(mmap(nullptr, 16 * sizeof(T), PROT_READ | PROT_WRITE, flags, -1, 0));
     if (this->ptr == MAP_FAILED) {
