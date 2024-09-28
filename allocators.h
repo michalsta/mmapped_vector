@@ -31,6 +31,7 @@ protected:
     size_t size;
     size_t capacity;
     std::conditional_t<thread_safe, std::mutex, std::monostate> guard;
+    //std::mutex guard;
 public:
     Allocator();
     virtual ~Allocator();
@@ -41,6 +42,10 @@ public:
     T* get_ptr() const;
     
 };
+
+template <typename T, bool thread_safe> Allocator<T, thread_safe>::Allocator() : ptr(nullptr), size(0), capacity(0), guard() {};
+template <typename T, bool thread_safe> Allocator<T, thread_safe>::~Allocator() {};
+
 
 template<typename T, bool thread_safe> inline
 size_t Allocator<T, thread_safe>::get_size() const {
@@ -76,7 +81,7 @@ MmapAllocator<T, thread_safe>::MmapAllocator() : MmapAllocator<T, thread_safe>(M
 
 template <typename T, bool thread_safe>
 MmapAllocator<T, thread_safe>::MmapAllocator(int flags) : Allocator<T, thread_safe>() {
-    auto fun_body[&]()
+    auto fun_body = [&]()
     {
         this->ptr = static_cast<T*>(mmap(nullptr, 16 * sizeof(T), PROT_READ | PROT_WRITE, flags, -1, 0));
         if (this->ptr == MAP_FAILED) {
@@ -84,12 +89,12 @@ MmapAllocator<T, thread_safe>::MmapAllocator(int flags) : Allocator<T, thread_sa
         }
         this->size = 0;
         this->capacity = 16;
-    }
+    };
 
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(guard)
-        fun_body()
+        std::lock_guard<std::mutex>(this->guard);
+        fun_body();
     }
     else
         fun_body();
@@ -135,74 +140,12 @@ T* MmapAllocator<T, false>::resize(size_t new_capacity) {
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
     if (new_ptr == MAP_FAILED)
         throw_if_error("mremap");
-
-    this->ptr = static_cast<T*>(new_ptr);
-
-    this->capacity = new_capacity;
-    return this->ptr;
-}
-
-template <typename T, bool thread_safe>
-T* MmapAllocator<T, true>::resize(size_t new_size) {
-    std::scoped_lock lock(this->guard);
-    return Allocator<T, false>::resize(new_size);
-}
-
-
-
-
-template <typename T, bool thread_safe = false>
-class StdAllocator : public Allocator<T, thread_safe>
-{
-public:
-    StdAllocator();
-    ~StdAllocator() override;
-
-    T* resize(size_t new_size) override;
-};
-
-template <typename T, bool thread_safe>
-StdAllocator<T, thread_safe>::StdAllocator() : Allocator<T, thread_safe>() {
-    this->ptr = nullptr;
-    this->size = 0;
-}
-
-template <typename T, bool thread_safe>
-StdAllocator<T, thread_safe>::~StdAllocator() {
-    free(this->ptr);
-}
-
-template <typename T, bool thread_safe>
+StdAllocator<T, thread_safe>::StdAllocator() : Allocator<T, thread_safe>() {ate <typename T, bool thread_safe>
 T* StdAllocator<T, false>::resize(size_t new_size) {
     if (new_size == this->size) return this->ptr;
 
     T* new_ptr = static_cast<T*>(realloc(this->ptr, new_size * sizeof(T)));
-    if (new_ptr == nullptr)
-        throw std::bad_alloc();
-
-    this->ptr = new_ptr;
-    this->size = new_size;
-    return this->ptr;
-}
-
-template <typename T, bool thread_safe>
-T* StdAllocator<T, true>::resize(size_t new_size) {
-    std::scoped_lock lock(this->guard);
-    return Allocator<T, false>::resize(new_size);
-}
-
-
-template <typename T, bool thread_safe = false>
-class MmappedFileAllocator : public Allocator<T, thread_safe>
-{
-    int file_descriptor;
-
-public:
-    MmappedFileAllocator(std::string filename);
-    MmappedFileAllocator(std::string filename, int fopen_flags, int file_permissions, int mmap_flags);
-    ~MmappedFileAllocator() override;
-
-    T* resize(size_t new_size) override;
+    if (new_ptr == nullptr)MmappedFileAllocator<T, thread_safe>::MmappedFileAllocator(std::string filename) : MmappedFileAllocator(filename, O_RDWR | O_CREAT | O_TRUNC, 0666, 0) {}
 };
 
 template <typename T, bool thread_safe>
