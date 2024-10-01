@@ -36,7 +36,10 @@ protected:
     std::conditional_t<thread_safe, std::mutex, std::monostate> guard;
 public:
     Allocator();
+    Allocator(const Allocator&) = delete;
     virtual ~Allocator();
+    operator=(const Allocator&) = delete;
+
 
     virtual T* resize_unguarded(size_t new_size) = 0;
     T* resize(size_t new_size);
@@ -47,7 +50,7 @@ public:
     size_t get_backing_size() const;
     virtual void sync(size_t used_elements) const;
 
-    friend class MmappedVector<T, Allocator, thread_safe>; // Friend declaration
+    friend class MmappedVector<T, Allocator, thread_safe>;
 };
 
 template <typename T, bool thread_safe> Allocator<T, thread_safe>::Allocator() : ptr(nullptr), capacity(0), guard() {};
@@ -117,7 +120,9 @@ class MmapAllocator : public Allocator<T, thread_safe>
 public:
     MmapAllocator();
     MmapAllocator(int flags);
+    MmapAllocator(const MmapAllocator&) = delete;
     ~MmapAllocator() override;
+    operator=(const MmapAllocator&) = delete;
 
     T* resize_unguarded(size_t new_size) override;
 
@@ -195,7 +200,9 @@ class MmapFileAllocator : public Allocator<T, thread_safe>
 public:
     MmapFileAllocator();
     MmapFileAllocator(const std::string& file_name, int mmap_flags, int open_flags = O_RDWR | O_CREAT, mode_t mode = S_IRUSR | S_IWUSR);
+    MmapFileAllocator(const MmapFileAllocator&) = delete;
     ~MmapFileAllocator() override;
+    operator=(const MmapFileAllocator&) = delete;
 
     T* resize_unguarded(size_t new_size) override;
     size_t get_backing_size() const override;
@@ -308,7 +315,9 @@ class MallocAllocator : public Allocator<T, thread_safe>
 {
 public:
     MallocAllocator();
+    MallocAllocator(const MallocAllocator&) = delete;   // Copy constructor is not allowed unless elided
     ~MallocAllocator() override;
+    operator=(const MallocAllocator&) = delete;
 
     T* resize_unguarded(size_t new_size) override;
 
