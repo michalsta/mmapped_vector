@@ -97,9 +97,6 @@ public:
     T& at(size_t pos);
     const T& at(size_t pos) const;
 
-    // Synchronizes the mapped memory with the underlying storage device
-    void sync();
-
     // Comparison operators
     bool operator==(const MmappedVector& other) const;
     bool operator!=(const MmappedVector& other) const;
@@ -114,7 +111,7 @@ MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(AllocatorType _alloc
     : allocator(_allocator), element_count(allocator.get_size()) {};
 
 template <typename T, typename AllocatorType, bool thread_safe>
-MmappedVector<T, AllocatorType, thread_safe>::~MmappedVector() {};
+MmappedVector<T, AllocatorType, thread_safe>::~MmappedVector() { sync(this->element_count); };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T& MmappedVector<T, AllocatorType, thread_safe>::operator[](size_t index) const {
@@ -188,6 +185,88 @@ void MmappedVector<T, AllocatorType, thread_safe>::resize(size_t new_size) {
     allocator.resize(new_size);
     element_count = new_size;
 };
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+void MmappedVector<T, AllocatorType, thread_safe>::reserve(size_t new_capacity) {
+    allocator.increase_capacity(new_capacity);
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+void MmappedVector<T, AllocatorType, thread_safe>::shrink_to_fit() {
+    allocator.resize(element_count);
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+T* MmappedVector<T, AllocatorType, thread_safe>::data() {
+    return allocator.T;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+const T* MmappedVector<T, AllocatorType, thread_safe>::data() const {
+    return allocator.T;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+T* MmappedVector<T, AllocatorType, thread_safe>::begin() {
+    return allocator.T;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+T* MmappedVector<T, AllocatorType, thread_safe>::end() {
+    return allocator.T + element_count;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+const T* MmappedVector<T, AllocatorType, thread_safe>::begin() const {
+    return allocator.T;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+const T* MmappedVector<T, AllocatorType, thread_safe>::end() const {
+    return allocator.T + element_count;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+const T* MmappedVector<T, AllocatorType, thread_safe>::cbegin() const {
+    return allocator.T;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+const T* MmappedVector<T, AllocatorType, thread_safe>::cend() const {
+    return allocator.T + element_count;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+T& MmappedVector<T, AllocatorType, thread_safe>::at(size_t pos) {
+    if (pos >= element_count) {
+        throw std::out_of_range("MmappedVector::at: index out of range");
+    }
+    return allocator[pos];
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+const T& MmappedVector<T, AllocatorType, thread_safe>::at(size_t pos) const {
+    if (pos >= element_count) {
+        throw std::out_of_range("MmappedVector::at: index out of range");
+    }
+    return allocator[pos];
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+bool MmappedVector<T, AllocatorType, thread_safe>::operator==(const MmappedVector& other) const {
+    if (element_count != other.element_count) return false;
+    for (size_t i = 0; i < element_count; i++) {
+        if (allocator.T[i] != other.allocator.T[i]) return false;
+    }
+    return true;
+};
+
+template <typename T, typename AllocatorType, bool thread_safe> inline
+bool MmappedVector<T, AllocatorType, thread_safe>::operator!=(const MmappedVector& other) const {
+    return !(*this == other);
+};
+
+
 
 
 } // namespace mmapped_vector

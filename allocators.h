@@ -43,6 +43,7 @@ public:
     size_t get_capacity() const;
     T* get_ptr() const;
     size_t get_backing_size() const;
+    virtual void sync(size_t used_elements) const;
     
     friend class mmapped_vector; // Friend declaration
 };
@@ -105,6 +106,9 @@ void Allocator<T, thread_safe>::increase_capacity(size_t capacity_needed) {
     else
         increase_capacity_unguarded();
 }
+
+template <typename T, bool thread_safe> inline
+void Allocator<T, thread_safe>::sync(size_t) const {};
 
 /*
  * =================================================================================================
@@ -198,6 +202,7 @@ public:
 
     T* resize_unguarded(size_t new_size) override;
     size_t get_backing_size() const override;
+    void sync(size_t used_elements) const override;
 
     friend class mmapped_vector; // Friend declaration
 private:
@@ -234,7 +239,7 @@ MmapFileAllocator<T, thread_safe>::MmapFileAllocator(const std::string& file_nam
         }
 
         this->backing_size = st.st_size / sizeof(T);
-        this->capacity = this->size;
+        this->capacity = this->backing_size;
         this->file_name = file_name;
         this->file_descriptor = fd.get();
     };
@@ -253,6 +258,7 @@ MmapFileAllocator<T, thread_safe>::~MmapFileAllocator() {
     auto fun_body = [&]()
     {
         if (this->ptr) {
+            this->resize_unguarded(this->get_backing_size());
             munmap(this->ptr, this->size * sizeof(T));
             this->ptr = nullptr;
             this->size = 0;
@@ -288,6 +294,11 @@ T* MmapFileAllocator<T, thread_safe>::resize_unguarded(size_t new_capacity) {
     this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
     return this->ptr;
+}
+
+template <typename T, bool thread_safe>
+void MmapFileAllocator<T, thread_safe>::sync(size_t used_elements) const {
+    this->backing_size = used_elements;
 }
 
 /*
