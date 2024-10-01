@@ -26,40 +26,39 @@ int main(int argc, char* argv[]) {
     if(argc > 2) {
         test_file = argv[2];
     }
+    struct TestResult {
+        std::string name;
+        double duration;
+    };
+    std::vector<TestResult> results;
 
-
-    double std_vector_duration = test_vector_performance<std::vector<int>>();
-    double mmapped_vector_duration = test_vector_performance<MmappedVector<int, MallocAllocator<int, false>>>();
-    double mmapped_vector_mmap_allocator_duration = test_vector_performance<MmappedVector<int, MmapAllocator<int, false>>>();
-    double mmapped_vector_file_allocator_duration = test_vector_performance<MmappedVector<int, MmapFileAllocator<int, false>>>(test_file, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC);
-
-    std::cout << "std::vector push_back duration: " << std_vector_duration << " seconds" << std::endl;
-    std::cout << "mmapped_vector (MallocAllocator) push_back duration: " << mmapped_vector_duration << " seconds" << std::endl;
-    std::cout << "mmapped_vector (MmapAllocator) push_back duration: " << mmapped_vector_mmap_allocator_duration << " seconds" << std::endl;
-    std::cout << "mmapped_vector (FileAllocator) push_back duration: " << mmapped_vector_file_allocator_duration << " seconds" << std::endl;
-
-    if (mmapped_vector_duration != 0) {
-        double speedup_factor_malloc = std_vector_duration / mmapped_vector_duration;
-        std::cout << "Speedup factor (MallocAllocator): " << speedup_factor_malloc << std::endl;
-    } else {
-        std::cout << "mmapped_vector (MallocAllocator) duration is zero, cannot calculate speedup factor." << std::endl;
-    }
-
-    if (mmapped_vector_mmap_allocator_duration != 0) {
-        double speedup_factor_mmap = std_vector_duration / mmapped_vector_mmap_allocator_duration;
-        std::cout << "Speedup factor (MmapAllocator): " << speedup_factor_mmap << std::endl;
-    } else {
-        std::cout << "mmapped_vector (MmapAllocator) duration is zero, cannot calculate speedup factor." << std::endl;
-    }
-
-    if (mmapped_vector_file_allocator_duration != 0) {
-        double speedup_factor_file = std_vector_duration / mmapped_vector_file_allocator_duration;
-        std::cout << "Speedup factor (FileAllocator): " << speedup_factor_file << std::endl;
-    } else {
-        std::cout << "mmapped_vector (FileAllocator) duration is zero, cannot calculate speedup factor." << std::endl;
-    }
-
+    results.push_back({"std::vector", test_vector_performance<std::vector<size_t>>()});
+    results.push_back({"mmapped_vector (MallocAllocator)", test_vector_performance<MmappedVector<size_t, MallocAllocator<size_t, false>>>()});
+    results.push_back({"mmapped_vector (MmapAllocator)", test_vector_performance<MmappedVector<size_t, MmapAllocator<size_t, false>>>()});
+    results.push_back({"mmapped_vector (FileAllocator)", test_vector_performance<MmappedVector<size_t, MmapFileAllocator<size_t, false>>>(test_file, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC)});
     remove(test_file.c_str());
+    results.push_back({"mmapped_vector (MallocAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MallocAllocator<size_t, true>, true>>()});
+    results.push_back({"mmapped_vector (MmapAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MmapAllocator<size_t, true>, true>>()});
+    results.push_back({"mmapped_vector (FileAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MmapFileAllocator<size_t, true>, true>>(test_file, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC)});
+    remove(test_file.c_str());
+
+    for (const auto& result : results) {
+        std::cout << result.name << " push_back duration: " << result.duration << " seconds" << std::endl;
+    }
+
+    double std_vector_duration = results[0].duration;
+
+    for (const auto& result : results) {
+        if (result.name != "std::vector") {
+            if (result.duration != 0) {
+                double speedup_factor = std_vector_duration / result.duration;
+                std::cout << "Speedup factor (" << result.name << "): " << speedup_factor << std::endl;
+            } else {
+                std::cout << result.name << " duration is zero, cannot calculate speedup factor." << std::endl;
+            }
+        }
+    }
+
 
     return 0;
 }
