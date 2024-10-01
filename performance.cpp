@@ -46,19 +46,23 @@ int main(int argc, char* argv[]) {
         std::cout << result.name << " push_back duration: " << result.duration << " seconds" << std::endl;
     }
 
+    results.push_back({"item_count", static_cast<double>(TEST_SIZE)});
+
     double std_vector_duration = results[0].duration;
 
-    for (const auto& result : results) {
-        if (result.name != "std::vector") {
-            if (result.duration != 0) {
-                double speedup_factor = std_vector_duration / result.duration;
-                std::cout << "Speedup factor (" << result.name << "): " << speedup_factor << std::endl;
-            } else {
-                std::cout << result.name << " duration is zero, cannot calculate speedup factor." << std::endl;
-            }
+    std::cout << "[" << std::endl;
+    for (size_t i = 0; i < results.size(); ++i) {
+        const auto& result = results[i];
+        std::cout << "  {" << std::endl;
+        std::cout << "    \"name\": \"" << result.name << "\"," << std::endl;
+        std::cout << "    \"duration\": " << result.duration << std::endl;
+        std::cout << "  }";
+        if (i < results.size() - 1) {
+            std::cout << ",";
         }
+        std::cout << std::endl;
     }
-
+    std::cout << "]" << std::endl;
 
     return 0;
 }
