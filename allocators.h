@@ -131,7 +131,6 @@ public:
 };
 
 
-
 template <typename T, bool thread_safe>
 MmapAllocator<T, thread_safe>::MmapAllocator() : MmapAllocator<T, thread_safe>(MAP_ANONYMOUS | MAP_PRIVATE) {};
 
@@ -176,7 +175,8 @@ MmapAllocator<T, thread_safe>::~MmapAllocator() {
 }
 
 template <typename T, bool thread_safe>
-T* MmapAllocator<T, thread_safe>::resize_unguarded(size_t new_capacity) {
+T* MmapAllocator<T, thread_safe>::resize_unguarded([[maybe_unused]] size_t new_capacity) {
+#ifdef MREMAP_MAYMOVE
     if (new_capacity == this->capacity) return this->ptr;
 
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
@@ -186,6 +186,9 @@ T* MmapAllocator<T, thread_safe>::resize_unguarded(size_t new_capacity) {
     this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
     return this->ptr;
+#else
+    throw std::runtime_error("MmapAllocator: mremap is not available on this system");
+#endif
 }
 
 
@@ -207,7 +210,7 @@ public:
 
     T* resize_unguarded(size_t new_size) override;
     size_t get_backing_size() const override;
-    void sync(size_t used_elements) const override;
+    void sync(size_t used_elements) override;
 
     friend class MmappedVector<T, MmapFileAllocator, thread_safe>; // Friend declaration
 private:
@@ -284,7 +287,8 @@ MmapFileAllocator<T, thread_safe>::~MmapFileAllocator() {
 }
 
 template <typename T, bool thread_safe>
-T* MmapFileAllocator<T, thread_safe>::resize_unguarded(size_t new_capacity) {
+T* MmapFileAllocator<T, thread_safe>::resize_unguarded([[maybe_unused]] size_t new_capacity) {
+#ifdef MREMAP_MAYMOVE
     if (new_capacity == this->capacity) return this->ptr;
 
     if (ftruncate(this->file_descriptor, new_capacity * sizeof(T)) == -1) {
@@ -299,10 +303,13 @@ T* MmapFileAllocator<T, thread_safe>::resize_unguarded(size_t new_capacity) {
     this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
     return this->ptr;
+#else
+    throw std::runtime_error("MmapFileAllocator: mremap is not available on this system");
+#endif
 }
 
 template <typename T, bool thread_safe>
-void MmapFileAllocator<T, thread_safe>::sync(size_t used_elements) const {
+void MmapFileAllocator<T, thread_safe>::sync(size_t used_elements) {
     this->backing_size = used_elements;
 }
 
