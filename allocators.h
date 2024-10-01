@@ -37,6 +37,8 @@ public:
 
     virtual T* resize_unguarded(size_t new_size) = 0;
     T* resize(size_t new_size);
+    void increase_capacity_unguarded(size_t capacity_needed);
+    void increase_capacity(size_t capacity_needed);
     size_t get_size() const;
     size_t get_capacity() const;
     T* get_ptr() const;
@@ -78,6 +80,30 @@ T* Allocator<T, thread_safe>::resize(size_t new_size) {
     }
     else
         return resize_unguarded(new_size);
+}
+
+template <typename T, bool thread_safe> inline
+void Allocator<T, thread_safe>::increase_capacity_unguarded(size_t capacity_needed) {
+    if(this->capacity >= capacity_needed) return;
+    size_t new_capacity;
+    if(this->capacity <= 8)
+        new_capacity = 16;
+    else
+        new_capacity = this->capacity;
+    while(new_capacity < capacity_needed)
+        new_capacity *= 2;
+    resize_unguarded(new_capacity);
+}
+
+template <typename T, bool thread_safe> inline
+void Allocator<T, thread_safe>::increase_capacity(size_t capacity_needed) {
+    if constexpr(thread_safe)
+    {
+        std::lock_guard<std::mutex>(this->guard);
+        increase_capacity_unguarded();
+    }
+    else
+        increase_capacity_unguarded();
 }
 
 /*
