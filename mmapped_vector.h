@@ -15,7 +15,7 @@ namespace mmapped_vector {
 template <typename T, typename AllocatorType, bool thread_safe = false>
 class MmappedVector {
     static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable for safe memory movement");
-    // TODO static_assert(std::is_base_of<Allocator, AllocatorType>::value, "AllocatorType must be derived from Allocator");
+    static_assert(std::is_base_of<Allocator<T, thread_safe>, AllocatorType>::value, "AllocatorType must be derived from Allocator");
 
 private:
     AllocatorType allocator;
@@ -128,11 +128,11 @@ template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::push_back(const T& value) {
     if constexpr(thread_safe) {
         size_t place_idx = element_count.fetch_add(1);
-        if (place_idx >= allocator.get_capacity()) 
+        if (place_idx >= allocator.get_capacity())
             allocator.increase_capacity(place_idx + 1);
         allocator.ptr[place_idx] = value;
     } else {
-        if (element_count >= allocator.get_capacity()) 
+        if (element_count >= allocator.get_capacity())
             allocator.increase_capacity(element_count + 1);
         allocator.ptr[element_count++] = value;
     }
