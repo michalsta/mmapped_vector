@@ -3,7 +3,7 @@
 #include <chrono>
 #include "mmapped_vector.h" // Adjust the path as necessary
 
-size_t TEST_SIZE = 1000000000;
+size_t TEST_SIZE = 10000000;
 
 using namespace mmapped_vector;
 template <typename VectorType, typename... Args>
