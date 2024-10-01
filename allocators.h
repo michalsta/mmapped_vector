@@ -46,7 +46,7 @@ public:
     T* get_ptr() const;
     size_t get_backing_size() const;
     virtual void sync(size_t used_elements) const;
-    
+
     friend class MmappedVector<T, Allocator, thread_safe>; // Friend declaration
 };
 
@@ -136,7 +136,7 @@ MmapAllocator<T, thread_safe>::MmapAllocator(int flags) : Allocator<T, thread_sa
     {
         this->ptr = static_cast<T*>(mmap(nullptr, 16 * sizeof(T), PROT_READ | PROT_WRITE, flags, -1, 0));
         if (this->ptr == MAP_FAILED) {
-            throw std::runtime_error("MmapAllocator: mmap failed: " + mmapped_vector::get_error_message("mmap"));
+            throw std::runtime_error("MmapAllocator::ctor: mmap failed: " + mmapped_vector::get_error_message("mmap"));
         }
         this->capacity = 16;
     };
@@ -155,7 +155,7 @@ MmapAllocator<T, thread_safe>::~MmapAllocator<T, thread_safe>() {
     auto fun_body = [&]()
     {
         if (this->ptr) {
-            munmap(this->ptr, this->size * sizeof(T));
+            munmap(this->ptr, this->capacity * sizeof(T));
             this->ptr = nullptr;
             this->capacity = 0;
         }
@@ -263,7 +263,7 @@ MmapFileAllocator<T, thread_safe>::~MmapFileAllocator() {
             if (this->file_descriptor != -1) {
                 close(this->file_descriptor);
                 this->file_descriptor = -1;
-            }            
+            }
         }
     };
     if constexpr(thread_safe)
