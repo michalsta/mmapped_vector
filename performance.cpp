@@ -3,46 +3,12 @@
 #include <chrono>
 #include "mmapped_vector.h" // Adjust the path as necessary
 
-#define TEST_SIZE 10000
+#define TEST_SIZE 1000000000
 
 using namespace mmapped_vector;
-
-double test_std_vector_performance() {
-    std::vector<int> vec;
-    auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < TEST_SIZE; ++i) {
-        vec.push_back(i);
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> duration = end - start;
-    return duration.count();
-}
-
-double test_mmapped_vector_performance() {
-    MmappedVector<int, MallocAllocator<int, false> > vec; // Assuming mmapped_vector is similar to std::vector
-    auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < TEST_SIZE; ++i) {
-        vec.push_back(i);
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> duration = end - start;
-    return duration.count();
-}
-
-double test_mmapped_vector_mmap_allocator_performance() {
-    MmappedVector<int, MmapAllocator<int, false>> vec({}); // Assuming mmapped_vector with mmap_allocator
-    auto start = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < TEST_SIZE; ++i) {
-        vec.push_back(i);
-    }
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> duration = end - start;
-    return duration.count();
-}
-
-// Add test for file-backed allocator
-double test_mmapped_vector_file_allocator_performance() {
-    MmappedVector<int, MmapFileAllocator<int, false>> vec("/home/mist/test.dat", MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC);
+template <typename VectorType, typename... Args>
+double test_vector_performance(Args&&... args) {
+    VectorType vec(std::forward<Args>(args)...);
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < TEST_SIZE; ++i) {
         vec.push_back(i);
@@ -53,10 +19,10 @@ double test_mmapped_vector_file_allocator_performance() {
 }
 
 int main() {
-    double std_vector_duration = test_std_vector_performance();
-    double mmapped_vector_duration = test_mmapped_vector_performance();
-    double mmapped_vector_mmap_allocator_duration = test_mmapped_vector_mmap_allocator_performance();
-    double mmapped_vector_file_allocator_duration = test_mmapped_vector_file_allocator_performance();
+    double std_vector_duration = test_vector_performance<std::vector<int>>();
+    double mmapped_vector_duration = test_vector_performance<MmappedVector<int, MallocAllocator<int, false>>>();
+    double mmapped_vector_mmap_allocator_duration = test_vector_performance<MmappedVector<int, MmapAllocator<int, false>>>();
+    double mmapped_vector_file_allocator_duration = test_vector_performance<MmappedVector<int, MmapFileAllocator<int, false>>>("/home/mist/test.dat", MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC);
 
     std::cout << "std::vector push_back duration: " << std_vector_duration << " seconds" << std::endl;
     std::cout << "mmapped_vector (MallocAllocator) push_back duration: " << mmapped_vector_duration << " seconds" << std::endl;
@@ -83,6 +49,8 @@ int main() {
     } else {
         std::cout << "mmapped_vector (FileAllocator) duration is zero, cannot calculate speedup factor." << std::endl;
     }
+
+    remove("/home/mist/test.dat");
 
     return 0;
 }

@@ -1,9 +1,10 @@
 headers: allocators.gch mmapped_vector.gch
 %.gch: %.h
 	$(CXX) -std=c++20 -Wall -Wextra -fmax-errors=1 $< -o $@
-performance: performance.cpp headers
-	$(CXX) -std=c++20 -Wall -Wextra -fmax-errors=1 -Og -g -fsanitize=address performance.cpp -o performance
-	#$(CXX) -std=c++20 -Wall -Wextra -fmax-errors=1 -O3 performance.cpp -o performance
+performance: performance.cpp #headers
+	#$(CXX) -std=c++20 -Wall -Wextra -fmax-errors=1 -Og -g performance.cpp -o performance
+	#$(CXX) -std=c++20 -Wall -Wextra -fmax-errors=1 -Og -g -fsanitize=address performance.cpp -o performance
+	$(CXX) -std=c++20 -Wall -Wextra -fmax-errors=1 -O3 performance.cpp -o performance
 test: performance
 	./performance
 clean:

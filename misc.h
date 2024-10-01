@@ -21,8 +21,14 @@ public:
         }
         fd = new_fd;
     }
+    int release() {
+        int result = fd;
+        fd = -1;
+        return result;
+    }
 private:
     int fd;
 };
+
 
 #endif // MMAPPED_VECTOR_MISC_H
