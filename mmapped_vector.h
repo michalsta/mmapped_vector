@@ -23,7 +23,8 @@ private:
 
 public:
     // Default constructor: Creates an empty vector with initial capacity
-    MmappedVector(AllocatorType allocator = MallocAllocator<T, thread_safe>());
+    template <typename... Args>
+    MmappedVector(Args&&... args);
 
     // Destructor: Cleans up resources
     ~MmappedVector();
@@ -107,8 +108,10 @@ private:
 // Method implementations
 
 template <typename T, typename AllocatorType, bool thread_safe>
-MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(AllocatorType _allocator)
-    : allocator(_allocator), element_count(allocator.get_backing_size()) {};
+template <typename... Args>
+MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(Args&&... args)
+    : allocator(std::forward<Args>(args)...), element_count(allocator.get_backing_size()) {};
+
 
 template <typename T, typename AllocatorType, bool thread_safe>
 MmappedVector<T, AllocatorType, thread_safe>::~MmappedVector() { allocator.sync(this->element_count); };

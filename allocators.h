@@ -19,6 +19,7 @@
 
 #include "error_handling.h"
 #include "misc.h"
+#include <new>
 
 
 
@@ -156,7 +157,7 @@ MmapAllocator<T, thread_safe>::MmapAllocator(int flags) : Allocator<T, thread_sa
 }
 
 template <typename T, bool thread_safe>
-MmapAllocator<T, thread_safe>::~MmapAllocator<T, thread_safe>() {
+MmapAllocator<T, thread_safe>::~MmapAllocator() {
     auto fun_body = [&]()
     {
         if (this->ptr) {

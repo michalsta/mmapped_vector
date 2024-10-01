@@ -3,7 +3,7 @@
 #include <chrono>
 #include "mmapped_vector.h" // Adjust the path as necessary
 
-#define TEST_SIZE 1000
+#define TEST_SIZE 1000000
 
 using namespace mmapped_vector;
 
@@ -30,7 +30,7 @@ double test_mmapped_vector_performance() {
 }
 
 double test_mmapped_vector_mmap_allocator_performance() {
-    MmappedVector<int, MmapAllocator<int, false>> vec({MAP_ANONYMOUS | MAP_PRIVATE})); // Assuming mmapped_vector with mmap_allocator
+    MmappedVector<int, MmapAllocator<int, false>> vec({}); // Assuming mmapped_vector with mmap_allocator
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < TEST_SIZE; ++i) {
         vec.push_back(i);
