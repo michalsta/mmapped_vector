@@ -16,6 +16,7 @@
 #include <variant>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <iostream>
 
 #include "error_handling.h"
 #include "misc.h"
@@ -48,8 +49,8 @@ public:
     void increase_capacity(size_t capacity_needed);
     size_t get_capacity() const;
     T* get_ptr() const;
-    size_t get_backing_size() const;
-    virtual void sync(size_t used_elements) const;
+    virtual size_t get_backing_size() const;
+    virtual void sync(size_t used_elements);
 
     friend class MmappedVector<T, Allocator, thread_safe>;
 };
@@ -109,7 +110,7 @@ void Allocator<T, thread_safe>::increase_capacity(size_t capacity_needed) {
 }
 
 template <typename T, bool thread_safe> inline
-void Allocator<T, thread_safe>::sync(size_t) const {};
+void Allocator<T, thread_safe>::sync(size_t) {};
 
 /*
  * =================================================================================================
@@ -233,23 +234,37 @@ MmapFileAllocator<T, thread_safe>::MmapFileAllocator(const std::string& file_nam
     {
         RAIIFileDescriptor fd(open(file_name.c_str(), open_flags, mode));
         if (fd.get() == -1) {
-            throw std::runtime_error("MmapFileAllocator: open failed: " + mmapped_vector::get_error_message("open"));
+            throw std::runtime_error("MmapFileAllocator::ctor: open failed: " + mmapped_vector::get_error_message("open"));
         }
 
         struct stat st;
-        if (fstat(fd.get(), &st) == -1) {
-            throw std::runtime_error("MmapFileAllocator: fstat failed: " + mmapped_vector::get_error_message("fstat"));
-        }
+        if (fstat(fd.get(), &st) == -1)
+            throw std::runtime_error("MmapFileAllocator::ctor: fstat failed: " + mmapped_vector::get_error_message("fstat"));
 
-        this->ptr = static_cast<T*>(mmap(nullptr, st.st_size, PROT_READ | PROT_WRITE, mmap_flags, fd.get(), 0));
-        if (this->ptr == MAP_FAILED) {
-            throw std::runtime_error("MmapFileAllocator: mmap failed: " + mmapped_vector::get_error_message("mmap"));
-        }
+        if(st.st_size % sizeof(T) != 0)
+            throw std::runtime_error("MmapFileAllocator::ctor: file size is not a multiple of sizeof(T). It's probably corrupted.");
 
         this->backing_size = st.st_size / sizeof(T);
         this->capacity = this->backing_size;
+        if(this->capacity < 16)
+        {
+            this->capacity = 16;
+            if(ftruncate(fd.get(), this->capacity * sizeof(T)) == -1)
+                throw std::runtime_error("MmapFileAllocator::ctor: ftruncate failed: " + mmapped_vector::get_error_message("ftruncate"));
+
+        }
+
+        this->ptr = static_cast<T*>(mmap(nullptr, this->capacity * sizeof(T), PROT_READ | PROT_WRITE, mmap_flags, fd.get(), 0));
+        if (this->ptr == MAP_FAILED) {
+            // print args of previous mmap
+            std::cerr << "file_name: " << file_name << ", mmap_flags: " << mmap_flags << ", open_flags: " << open_flags << ", mode: " << mode << std::endl;
+
+            throw std::runtime_error("MmapFileAllocator::ctor: mmap failed: " + mmapped_vector::get_error_message("mmap"));
+        }
+
         this->file_name = file_name;
         this->file_descriptor = fd.get();
+        std::cerr << "file_descriptor: " << this->file_descriptor << std::endl;
     };
 
     if constexpr(thread_safe)
@@ -267,9 +282,9 @@ MmapFileAllocator<T, thread_safe>::~MmapFileAllocator() {
     {
         if (this->ptr) {
             this->resize_unguarded(this->get_backing_size());
-            munmap(this->ptr, this->size * sizeof(T));
+            munmap(this->ptr, this->get_backing_size() * sizeof(T));
             this->ptr = nullptr;
-            this->size = 0;
+            this->backing_size = 0;
             this->capacity = 0;
             if (this->file_descriptor != -1) {
                 close(this->file_descriptor);
@@ -292,7 +307,8 @@ T* MmapFileAllocator<T, thread_safe>::resize_unguarded([[maybe_unused]] size_t n
     if (new_capacity == this->capacity) return this->ptr;
 
     if (ftruncate(this->file_descriptor, new_capacity * sizeof(T)) == -1) {
-        throw std::runtime_error("MmapFileAllocator: ftruncate failed: " + mmapped_vector::get_error_message("ftruncate"));
+        std::cerr << "new_capacity: " << new_capacity << std::endl << "this->file_descriptor: " << this->file_descriptor << std::endl;
+        throw std::runtime_error("MmapFileAllocator::resize_unguarded: ftruncate failed: " + mmapped_vector::get_error_message("ftruncate"));
     }
 
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
