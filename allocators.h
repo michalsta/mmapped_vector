@@ -24,6 +24,9 @@
 
 namespace mmapped_vector {
 
+template <typename T, typename AllocatorType, bool thread_safe>
+class MmappedVector;
+
 template <typename T, bool thread_safe = false>
 class Allocator
 {
@@ -39,23 +42,17 @@ public:
     T* resize(size_t new_size);
     void increase_capacity_unguarded(size_t capacity_needed);
     void increase_capacity(size_t capacity_needed);
-    size_t get_size() const;
     size_t get_capacity() const;
     T* get_ptr() const;
     size_t get_backing_size() const;
     virtual void sync(size_t used_elements) const;
     
-    friend class mmapped_vector; // Friend declaration
+    friend class MmappedVector<T, Allocator, thread_safe>; // Friend declaration
 };
 
 template <typename T, bool thread_safe> Allocator<T, thread_safe>::Allocator() : ptr(nullptr), capacity(0), guard() {};
 template <typename T, bool thread_safe> Allocator<T, thread_safe>::~Allocator() {};
 
-
-template<typename T, bool thread_safe> inline
-size_t Allocator<T, thread_safe>::get_size() const {
-    return this->size;
-}
 
 template <typename T, bool thread_safe> inline
 size_t Allocator<T, thread_safe>::get_capacity() const {
@@ -101,10 +98,10 @@ void Allocator<T, thread_safe>::increase_capacity(size_t capacity_needed) {
     if constexpr(thread_safe)
     {
         std::lock_guard<std::mutex>(this->guard);
-        increase_capacity_unguarded();
+        increase_capacity_unguarded(capacity_needed);
     }
     else
-        increase_capacity_unguarded();
+        increase_capacity_unguarded(capacity_needed);
 }
 
 template <typename T, bool thread_safe> inline
@@ -124,7 +121,7 @@ public:
 
     T* resize_unguarded(size_t new_size) override;
 
-    friend class mmapped_vector; // Friend declaration
+    friend class MmappedVector<T, MmapAllocator, thread_safe>; // Friend declaration
 };
 
 
@@ -204,7 +201,7 @@ public:
     size_t get_backing_size() const override;
     void sync(size_t used_elements) const override;
 
-    friend class mmapped_vector; // Friend declaration
+    friend class MmappedVector<T, MmapFileAllocator, thread_safe>; // Friend declaration
 private:
     std::string file_name;
     int file_descriptor;
@@ -315,7 +312,7 @@ public:
 
     T* resize_unguarded(size_t new_size) override;
 
-    friend class mmapped_vector; // Friend declaration
+    friend class MmappedVector<T, MallocAllocator, thread_safe>; // Friend declaration
 };
 
 template <typename T, bool thread_safe>
@@ -326,7 +323,6 @@ MallocAllocator<T, thread_safe>::MallocAllocator() : Allocator<T, thread_safe>()
         if (!this->ptr) {
             throw std::runtime_error("MallocAllocator: malloc failed");
         }
-        this->size = 0;
         this->capacity = 16;
     };
 

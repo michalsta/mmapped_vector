@@ -108,28 +108,36 @@ private:
 
 template <typename T, typename AllocatorType, bool thread_safe>
 MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(AllocatorType _allocator)
-    : allocator(_allocator), element_count(allocator.get_size()) {};
+    : allocator(_allocator), element_count(allocator.get_backing_size()) {};
 
 template <typename T, typename AllocatorType, bool thread_safe>
-MmappedVector<T, AllocatorType, thread_safe>::~MmappedVector() { sync(this->element_count); };
+MmappedVector<T, AllocatorType, thread_safe>::~MmappedVector() { allocator.sync(this->element_count); };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T& MmappedVector<T, AllocatorType, thread_safe>::operator[](size_t index) const {
-    return allocator.T[index];
+    return allocator.ptr[index];
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 T& MmappedVector<T, AllocatorType, thread_safe>::operator[](size_t index) {
-    return allocator.T[index];
+    return allocator.ptr[index];
 };
 
 
-// TODO fix this
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::push_back(const T& value) {
-    allocator.resize(element_count + 1);
-    allocator[element_count++] = value;
+    if constexpr(thread_safe) {
+        size_t place_idx = element_count.fetch_add(1);
+        if (place_idx >= allocator.get_capacity()) 
+            allocator.increase_capacity(place_idx + 1);
+        allocator.ptr[place_idx] = value;
+    } else {
+        if (element_count >= allocator.get_capacity()) 
+            allocator.increase_capacity(element_count + 1);
+        allocator.ptr[element_count++] = value;
+    }
 };
+
 
 // TODO: shrink if needed
 template <typename T, typename AllocatorType, bool thread_safe> inline
@@ -198,42 +206,42 @@ void MmappedVector<T, AllocatorType, thread_safe>::shrink_to_fit() {
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 T* MmappedVector<T, AllocatorType, thread_safe>::data() {
-    return allocator.T;
+    return allocator.ptr;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T* MmappedVector<T, AllocatorType, thread_safe>::data() const {
-    return allocator.T;
+    return allocator.ptr;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 T* MmappedVector<T, AllocatorType, thread_safe>::begin() {
-    return allocator.T;
+    return allocator.ptr;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 T* MmappedVector<T, AllocatorType, thread_safe>::end() {
-    return allocator.T + element_count;
+    return allocator.ptr + element_count;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T* MmappedVector<T, AllocatorType, thread_safe>::begin() const {
-    return allocator.T;
+    return allocator.ptr;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T* MmappedVector<T, AllocatorType, thread_safe>::end() const {
-    return allocator.T + element_count;
+    return allocator.ptr + element_count;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T* MmappedVector<T, AllocatorType, thread_safe>::cbegin() const {
-    return allocator.T;
+    return allocator.ptr;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T* MmappedVector<T, AllocatorType, thread_safe>::cend() const {
-    return allocator.T + element_count;
+    return allocator.ptr + element_count;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
@@ -256,7 +264,7 @@ template <typename T, typename AllocatorType, bool thread_safe> inline
 bool MmappedVector<T, AllocatorType, thread_safe>::operator==(const MmappedVector& other) const {
     if (element_count != other.element_count) return false;
     for (size_t i = 0; i < element_count; i++) {
-        if (allocator.T[i] != other.allocator.T[i]) return false;
+        if (allocator.ptr[i] != other.allocator.ptr[i]) return false;
     }
     return true;
 };
