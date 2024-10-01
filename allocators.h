@@ -196,7 +196,6 @@ T* MmapAllocator<T, thread_safe>::resize_unguarded([[maybe_unused]] size_t new_c
     this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
     return this->ptr;
-    throw std::runtime_error("MmapAllocator: mremap is not available on this system");
 }
 
 
