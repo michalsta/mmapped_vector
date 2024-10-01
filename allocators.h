@@ -38,7 +38,7 @@ public:
     Allocator();
     Allocator(const Allocator&) = delete;
     virtual ~Allocator();
-    operator=(const Allocator&) = delete;
+    Allocator& operator=(const Allocator&) = delete;
 
 
     virtual T* resize_unguarded(size_t new_size) = 0;
@@ -122,7 +122,7 @@ public:
     MmapAllocator(int flags);
     MmapAllocator(const MmapAllocator&) = delete;
     ~MmapAllocator() override;
-    operator=(const MmapAllocator&) = delete;
+    MmapAllocator& operator=(const MmapAllocator&) = delete;
 
     T* resize_unguarded(size_t new_size) override;
 
@@ -202,7 +202,7 @@ public:
     MmapFileAllocator(const std::string& file_name, int mmap_flags, int open_flags = O_RDWR | O_CREAT, mode_t mode = S_IRUSR | S_IWUSR);
     MmapFileAllocator(const MmapFileAllocator&) = delete;
     ~MmapFileAllocator() override;
-    operator=(const MmapFileAllocator&) = delete;
+    MmapFileAllocator& operator=(const MmapFileAllocator&) = delete;
 
     T* resize_unguarded(size_t new_size) override;
     size_t get_backing_size() const override;
@@ -317,7 +317,7 @@ public:
     MallocAllocator();
     MallocAllocator(const MallocAllocator&) = delete;   // Copy constructor is not allowed unless elided
     ~MallocAllocator() override;
-    operator=(const MallocAllocator&) = delete;
+    MallocAllocator& operator=(const MallocAllocator&) = delete;
 
     T* resize_unguarded(size_t new_size) override;
 
