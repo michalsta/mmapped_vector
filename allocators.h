@@ -176,19 +176,27 @@ MmapAllocator<T, thread_safe>::~MmapAllocator() {
 
 template <typename T, bool thread_safe>
 T* MmapAllocator<T, thread_safe>::resize_unguarded([[maybe_unused]] size_t new_capacity) {
-#ifdef MREMAP_MAYMOVE
     if (new_capacity == this->capacity) return this->ptr;
 
+#ifdef MREMAP_MAYMOVE
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
     if (new_ptr == MAP_FAILED)
         throw_if_error("mremap");
+#else
+    // FIXME: Perhaps Mach API has something that'd allow us to avoid copying the data
+    void* new_ptr = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (new_ptr == MAP_FAILED) {
+        throw std::runtime_error("MmapAllocator::resize_unguarded: mmap failed: " + mmapped_vector::get_error_message("mmap"));
+    }
+    std::copy(this->ptr, this->ptr + std::min(this->capacity, new_capacity), static_cast<T*>(new_ptr));
+    if(munmap(this->ptr, this->capacity * sizeof(T)) == -1)
+        throw std::runtime_error("MmapAllocator::resize_unguarded: munmap failed: " + mmapped_vector::get_error_message("munmap"));
+#endif
 
     this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
     return this->ptr;
-#else
     throw std::runtime_error("MmapAllocator: mremap is not available on this system");
-#endif
 }
 
 
@@ -297,23 +305,28 @@ MmapFileAllocator<T, thread_safe>::~MmapFileAllocator() {
 
 template <typename T, bool thread_safe>
 T* MmapFileAllocator<T, thread_safe>::resize_unguarded([[maybe_unused]] size_t new_capacity) {
-#ifdef MREMAP_MAYMOVE
     if (new_capacity == this->capacity) return this->ptr;
 
     if (ftruncate(this->file_descriptor, new_capacity * sizeof(T)) == -1)
         throw std::runtime_error("MmapFileAllocator::resize_unguarded: ftruncate failed: " + mmapped_vector::get_error_message("ftruncate"));
 
+#ifdef MREMAP_MAYMOVE
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
     if (new_ptr == MAP_FAILED) {
         throw std::runtime_error("MmapFileAllocator: mremap failed: " + mmapped_vector::get_error_message("mremap"));
     }
+#else
+    if(munmap(this->ptr, this->capacity * sizeof(T)) == -1)
+        throw std::runtime_error("MmapFileAllocator::resize_unguarded: munmap failed: " + mmapped_vector::get_error_message("munmap"));
+    void* new_ptr = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, MAP_SHARED, this->file_descriptor, 0);
+    if (new_ptr == MAP_FAILED) {
+        throw std::runtime_error("MmapFileAllocator::resize_unguarded: mmap failed: " + mmapped_vector::get_error_message("mmap"));
+    }
+#endif
 
     this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
     return this->ptr;
-#else
-    throw std::runtime_error("MmapFileAllocator: mremap is not available on this system");
-#endif
 }
 
 template <typename T, bool thread_safe>
