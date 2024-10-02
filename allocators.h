@@ -77,7 +77,7 @@ template <typename T, bool thread_safe> inline
 T* Allocator<T, thread_safe>::resize(size_t new_size) {
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(this->guard);
+        const std::lock_guard<std::mutex> lock(this->guard);
         return resize_unguarded(new_size);
     }
     else
@@ -101,7 +101,7 @@ template <typename T, bool thread_safe> inline
 void Allocator<T, thread_safe>::increase_capacity(size_t capacity_needed) {
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(this->guard);
+        const std::lock_guard<std::mutex> lock(this->guard);
         increase_capacity_unguarded(capacity_needed);
     }
     else
@@ -148,7 +148,7 @@ MmapAllocator<T, thread_safe>::MmapAllocator(int flags) : Allocator<T, thread_sa
 
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(this->guard);
+        const std::lock_guard<std::mutex> lock(this->guard);
         fun_body();
     }
     else
@@ -167,7 +167,7 @@ MmapAllocator<T, thread_safe>::~MmapAllocator() {
     };
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(this->guard);
+        const std::lock_guard<std::mutex> lock(this->guard);
         fun_body();
     }
     else
@@ -270,7 +270,7 @@ MmapFileAllocator<T, thread_safe>::MmapFileAllocator(const std::string& file_nam
 
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(this->guard);
+        const std::lock_guard<std::mutex> lock(this->guard);
         fun_body();
     }
     else
@@ -295,7 +295,7 @@ MmapFileAllocator<T, thread_safe>::~MmapFileAllocator() {
     };
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(this->guard);
+        const std::lock_guard<std::mutex> lock(this->guard);
         fun_body();
     }
     else
@@ -365,7 +365,7 @@ MallocAllocator<T, thread_safe>::MallocAllocator() : Allocator<T, thread_safe>()
 
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(this->guard);
+        const std::lock_guard<std::mutex> lock(this->guard);
         fun_body();
     }
     else
@@ -384,7 +384,7 @@ MallocAllocator<T, thread_safe>::~MallocAllocator() {
     };
     if constexpr(thread_safe)
     {
-        std::lock_guard<std::mutex>(this->guard);
+        const std::lock_guard<std::mutex> lock(this->guard);
         fun_body();
     }
     else
