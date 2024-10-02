@@ -16,6 +16,10 @@
 #include <variant>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <cstring>
+#include <atomic>
+
 
 #include "error_handling.h"
 #include "misc.h"
@@ -35,6 +39,7 @@ protected:
     T* ptr;
     size_t capacity;
     std::conditional_t<thread_safe, std::mutex, std::monostate> guard;
+    std::conditional_t<thread_safe, std::atomic<size_t>, std::monostate> finished_pushes;
 public:
     Allocator();
     Allocator(const Allocator&) = delete;
@@ -101,8 +106,18 @@ template <typename T, bool thread_safe> inline
 void Allocator<T, thread_safe>::increase_capacity(size_t capacity_needed) {
     if constexpr(thread_safe)
     {
+        finished_pushes++;
         const std::lock_guard<std::mutex> lock(this->guard);
+        if(this->capacity >= capacity_needed)
+        {
+            finished_pushes--;
+            return;
+        }
+        while(finished_pushes != this->capacity+1) {
+            std::cerr << finished_pushes << " " << this->capacity << std::endl;
+        };
         increase_capacity_unguarded(capacity_needed);
+        finished_pushes--;
     }
     else
         increase_capacity_unguarded(capacity_needed);

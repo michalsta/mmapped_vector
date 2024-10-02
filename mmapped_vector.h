@@ -134,6 +134,7 @@ void MmappedVector<T, AllocatorType, thread_safe>::push_back(const T& value) {
         if (place_idx >= allocator.get_capacity())
             allocator.increase_capacity(place_idx + 1);
         allocator.ptr[place_idx] = value;
+        this->allocator.finished_pushes++;
     } else {
         if (element_count >= allocator.get_capacity())
             allocator.increase_capacity(element_count + 1);

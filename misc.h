@@ -2,7 +2,8 @@
 #ifndef MMAPPED_VECTOR_MISC_H
 #define MMAPPED_VECTOR_MISC_H
 
-#include <unistd.h> // for close()
+#include <unistd.h>
+#include <iostream>
 
 class RAIIFileDescriptor {
 public:
