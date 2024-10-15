@@ -5,6 +5,10 @@
 #include <algorithm>
 #include <thread>
 #include <cstddef>
+#include <chrono>
+#include <cstring>
+#include <cassert>
+
 
 typedef std::size_t size_t;
 
@@ -19,6 +23,7 @@ public:
     ParallelArray(size_t size) : size(size)
     {
         data = new T[size];
+        bzero(data, size);
     }
 
     ~ParallelArray()
@@ -37,8 +42,8 @@ public:
     }
 };
 
-const size_t size = 1000000;
-const size_t n_threads = std::thread::hardware_concurrency();
+const size_t size = 5000000;
+size_t n_threads = std::thread::hardware_concurrency();
 
 void print_sum(ParallelArray<int>& arr)
 {
@@ -52,6 +57,7 @@ void print_sum(ParallelArray<int>& arr)
 }
 
 // multithreaded performance tests
+template<std::memory_order mem_order = std::memory_order_relaxed>
 double test_atomic()
 {
     ParallelArray<int> arr(size*n_threads);
@@ -62,7 +68,7 @@ double test_atomic()
         int tostore = 0;
         for(size_t i = 0; i < size; i++)
         {
-            size_t local_idx = index.fetch_add(1, std::memory_order_relaxed);
+            size_t local_idx = index.fetch_add(1, mem_order);
             arr[local_idx] = tostore;
             tostore++;
         }
@@ -160,14 +166,36 @@ double test_mutexed()
     return std::chrono::duration<double>(end - start).count();
 }
 
+double test_singlethreaded()
+{
+    ParallelArray<int> arr(size*n_threads);
+    auto f = [&]()
+    {
+        int tostore = 0;
+        for(size_t i = 0; i < size*n_threads; i++)
+        {
+            arr[i] = tostore;
+            tostore++;
+        }
+    };
+    auto start = std::chrono::high_resolution_clock::now();
+    f();
+    auto end = std::chrono::high_resolution_clock::now();
+    print_sum(arr);
+    return std::chrono::duration<double>(end - start).count();
+}
 
 
 
 int main()
 {
-    std::cout << "Atomic: " << test_atomic() << "s\n";
+    n_threads = 8;
+    std::cout << "n_threads: " << n_threads << std::endl;
+    std::cout << "Atomic relaxed: " << test_atomic<std::memory_order_relaxed>() << "s\n";
+    std::cout << "Atomic seq_cst: " << test_atomic<std::memory_order_seq_cst>() << "s\n";
     std::cout << "Stripes: " << test_stripes() << "s\n";
     std::cout << "Chunked: " << test_chunked() << "s\n";
     std::cout << "Mutexed: " << test_mutexed() << "s\n";
+    std::cout << "Singlethreaded: " << test_singlethreaded() << "s\n";
     return 0;
 }
