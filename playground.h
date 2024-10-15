@@ -101,17 +101,17 @@ public:
         return vec[idx];
     }
 
-    size_t size() const {
+    size_t size() {
         std::lock_guard<std::mutex> lock(m);
         return vec.size();
     }
 
-    size_t capacity() const {
+    size_t capacity() {
         std::lock_guard<std::mutex> lock(m);
         return vec.capacity();
     }
 
-    bool empty() const {
+    bool empty() {
         std::lock_guard<std::mutex> lock(m);
         return vec.empty();
     }
@@ -120,12 +120,12 @@ public:
         std::lock_guard<std::mutex> lock(m);
         return vec.front();
     }
-
-    const T& front() const {
+/*
+    const T& front() {
         std::lock_guard<std::mutex> lock(m);
         return vec.front();
     }
-
+*/
     void pop_back() {
         std::lock_guard<std::mutex> lock(m);
         vec.pop_back();
