@@ -48,8 +48,6 @@ int main(int argc, char* argv[]) {
 
     results.push_back({"item_count", static_cast<double>(TEST_SIZE)});
 
-    double std_vector_duration = results[0].duration;
-
     std::cout << "[" << std::endl;
     for (size_t i = 0; i < results.size(); ++i) {
         const auto& result = results[i];
