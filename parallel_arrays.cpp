@@ -189,7 +189,7 @@ double test_singlethreaded()
 
 int main()
 {
-    n_threads = 8;
+    //n_threads = 8;
     std::cout << "n_threads: " << n_threads << std::endl;
     std::cout << "Atomic relaxed: " << test_atomic<std::memory_order_relaxed>() << "s\n";
     std::cout << "Atomic seq_cst: " << test_atomic<std::memory_order_seq_cst>() << "s\n";
