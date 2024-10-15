@@ -15,7 +15,7 @@ namespace mmapped_vector {
 template <typename T, typename AllocatorType, bool thread_safe = false>
 class MmappedVector {
     static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable for safe memory movement");
-    static_assert(std::is_base_of<Allocator<T, thread_safe>, AllocatorType>::value, "AllocatorType must be derived from Allocator");
+    static_assert(std::is_base_of<Allocator<T>, AllocatorType>::value, "AllocatorType must be derived from Allocator");
 
 private:
     AllocatorType allocator;
@@ -130,11 +130,7 @@ T& MmappedVector<T, AllocatorType, thread_safe>::operator[](size_t index) {
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::push_back(const T& value) {
     if constexpr(thread_safe) {
-        size_t place_idx = element_count.fetch_add(1);
-        if (place_idx >= allocator.get_capacity())
-            allocator.increase_capacity(place_idx + 1);
-        allocator.ptr[place_idx] = value;
-        this->allocator.finished_pushes++;
+        throw std::runtime_error("Not implemented");
     } else {
         if (element_count >= allocator.get_capacity())
             allocator.increase_capacity(element_count + 1);
@@ -194,7 +190,7 @@ void MmappedVector<T, AllocatorType, thread_safe>::clear() {
 // TODO probably needs to be deleted
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::resize(size_t new_size) {
-    allocator.resize(new_size);
+    //allocator.resize(new_size);
     element_count = new_size;
 };
 
@@ -205,7 +201,7 @@ void MmappedVector<T, AllocatorType, thread_safe>::reserve(size_t new_capacity) 
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::shrink_to_fit() {
-    allocator.resize(element_count);
+    //allocator.resize(element_count);
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline

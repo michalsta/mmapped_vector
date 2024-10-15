@@ -92,12 +92,21 @@ int main() {
     std::vector<size_t> vec5;
     results.push_back({"std::vector", test_vector_performance(vec5)});
     ThreadSafeVector<size_t> vec6;
+    test_vector_correctness(vec6);
     MutexedVector<size_t> vec7;
     test_vector_correctness(vec7);
+    MmappedVector<size_t, MallocAllocator<size_t, true>, true> vec8;
+    test_vector_correctness(vec8);
+    #if 0
+    //MmappedVector<size_t, MmapAllocator<size_t, true>, true> vec9;
+    //test_vector_correctness(vec9);
+    //MmappedVector<size_t, MmapFileAllocator<size_t, true>, true> vec10(test_file, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC);
+    //test_vector_correctness(vec10);
+    //remove(test_file.c_str());
 
     for (const auto& result : results) {
         std::cout << result.name << " push_back duration: " << result.duration << " seconds" << std::endl;
     }
-
+    #endif
     return 0;
 }

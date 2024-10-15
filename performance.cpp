@@ -1,7 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <chrono>
-#include "mmapped_vector.h" // Adjust the path as necessary
+#include "mmapped_vector.h"
 
 size_t TEST_SIZE = 10000000;
 
@@ -33,14 +33,14 @@ int main(int argc, char* argv[]) {
     std::vector<TestResult> results;
 
     results.push_back({"std::vector", test_vector_performance<std::vector<size_t>>()});
-    results.push_back({"mmapped_vector (MallocAllocator)", test_vector_performance<MmappedVector<size_t, MallocAllocator<size_t, false>>>()});
-    results.push_back({"mmapped_vector (MmapAllocator)", test_vector_performance<MmappedVector<size_t, MmapAllocator<size_t, false>>>()});
-    results.push_back({"mmapped_vector (FileAllocator)", test_vector_performance<MmappedVector<size_t, MmapFileAllocator<size_t, false>>>(test_file, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC)});
+    results.push_back({"mmapped_vector (MallocAllocator)", test_vector_performance<MmappedVector<size_t, MallocAllocator<size_t>>>()});
+    results.push_back({"mmapped_vector (MmapAllocator)", test_vector_performance<MmappedVector<size_t, MmapAllocator<size_t>>>()});
+    results.push_back({"mmapped_vector (FileAllocator)", test_vector_performance<MmappedVector<size_t, MmapFileAllocator<size_t>>>(test_file, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC)});
     remove(test_file.c_str());
-    results.push_back({"mmapped_vector (MallocAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MallocAllocator<size_t, true>, true>>()});
-    results.push_back({"mmapped_vector (MmapAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MmapAllocator<size_t, true>, true>>()});
-    results.push_back({"mmapped_vector (FileAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MmapFileAllocator<size_t, true>, true>>(test_file, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC)});
-    remove(test_file.c_str());
+    //results.push_back({"mmapped_vector (MallocAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MallocAllocator<size_t>, true>>()});
+    //results.push_back({"mmapped_vector (MmapAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MmapAllocator<size_t>, true>>()});
+    //results.push_back({"mmapped_vector (FileAllocator, thread_safe)", test_vector_performance<MmappedVector<size_t, MmapFileAllocator<size_t>, true>>(test_file, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC)});
+    //remove(test_file.c_str());
 
     for (const auto& result : results) {
         std::cout << result.name << " push_back duration: " << result.duration << " seconds" << std::endl;
