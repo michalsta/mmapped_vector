@@ -54,3 +54,16 @@ if __name__ == "__main__":
     plt.xscale('log')
     plt.yscale('log')
     plt.show()
+
+
+    for colname in results.columns:
+        if colname == 'test_size':
+            continue
+        if colname == 'std::vector':
+            plt.plot(results.test_size, results[colname]/results['std::vector'], label=colname, linewidth=5, color='black')
+        else:
+            plt.plot(results.test_size, results[colname]/results['std::vector'], label=colname, color=color_dict[colname])
+    plt.legend()
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.show()
