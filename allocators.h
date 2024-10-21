@@ -19,6 +19,12 @@
 #include <unistd.h>
 #include <cstring>
 #include <atomic>
+#if false //defined(__APPLE__) && defined(__MACH__)
+#include <mach/vm_map.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+
+#endif
 
 
 #include "error_handling.h"
@@ -124,10 +130,20 @@ MmapAllocator<T>::MmapAllocator() : MmapAllocator<T>(MAP_ANONYMOUS | MAP_PRIVATE
 
 template <typename T>
 MmapAllocator<T>::MmapAllocator(int flags) : Allocator<T>() {
+#if  false //defined(__APPLE__) && defined(__MACH__)
+    // Use Mach API mach_vm_map to allocate memory
+    mach_vm_address_t address = 0;
+    kern_return_t kr = mach_vm_map(mach_task_self(), &address, page_size, 0, VM_FLAGS_ANYWHERE, MEMORY_OBJECT_NULL, 0, FALSE, VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_NONE);
+    if (kr != KERN_SUCCESS) {
+        throw std::runtime_error("MmapAllocator::ctor: mach_vm_map failed: " + mmapped_vector::get_error_message("mach_vm_map"));
+    }
+    this->ptr = reinterpret_cast<T*>(address);
+#else
     this->ptr = static_cast<T*>(mmap(nullptr, page_size, PROT_READ | PROT_WRITE, flags, -1, 0));
     if (this->ptr == MAP_FAILED) {
         throw std::runtime_error("MmapAllocator::ctor: mmap failed: " + mmapped_vector::get_error_message("mmap"));
     }
+#endif
     this->capacity = page_size / sizeof(T);
 }
 
@@ -148,6 +164,18 @@ T* MmapAllocator<T>::resize(size_t new_capacity) {
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
     if (new_ptr == MAP_FAILED)
         throw_if_error("mremap");
+    this->ptr = static_cast<T*>(new_ptr);
+
+#elif false // defined(__APPLE__) && defined(__MACH__)
+    // Use Mach API mach_vm_remap to resize the memory region
+    mach_vm_address_t new_address = 0;
+    mach_vm_size_t new_size = new_capacity * sizeof(T);
+    kern_return_t kr = mach_vm_remap(mach_task_self(), &new_address, new_size, 0, VM_FLAGS_ANYWHERE, mach_task_self(), reinterpret_cast<mach_vm_address_t>(this->ptr), FALSE, nullptr, nullptr, VM_INHERIT_NONE);
+    if (kr != KERN_SUCCESS) {
+        throw std::runtime_error("MmapAllocator::resize: mach_vm_remap failed: " + mmapped_vector::get_error_message("mach_vm_remap"));
+    }
+    this->ptr = reinterpret_cast<T*>(new_address);
+
 #else
     // FIXME: Perhaps Mach API has something that'd allow us to avoid copying the data
     void* new_ptr = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
@@ -157,9 +185,10 @@ T* MmapAllocator<T>::resize(size_t new_capacity) {
     std::copy(this->ptr, this->ptr + std::min(this->capacity, new_capacity), static_cast<T*>(new_ptr));
     if(munmap(this->ptr, this->capacity * sizeof(T)) == -1)
         throw std::runtime_error("MmapAllocator::resize: munmap failed: " + mmapped_vector::get_error_message("munmap"));
+    this->ptr = static_cast<T*>(new_ptr);
+
 #endif
 
-    this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
     return this->ptr;
 }

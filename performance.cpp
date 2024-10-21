@@ -5,6 +5,13 @@
 
 size_t TEST_SIZE = 10000000;
 
+std::string test_file =
+#ifdef __APPLE__
+"/Users/mist/test.dat";
+#elif __linux__
+"/home/mist/test.dat";
+#endif
+
 using namespace mmapped_vector;
 template <typename VectorType, typename... Args>
 double test_vector_performance(Args&&... args) {
@@ -22,7 +29,7 @@ int main(int argc, char* argv[]) {
     if (argc > 1) {
         TEST_SIZE = std::stoull(argv[1]);
     }
-    std::string test_file = "/home/mist/test.dat";
+
     if(argc > 2) {
         test_file = argv[2];
     }
