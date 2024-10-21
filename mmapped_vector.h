@@ -22,6 +22,9 @@ private:
     std::conditional_t<thread_safe, std::atomic<size_t>, size_t> element_count;
 
 public:
+    // Data type
+    using value_type = T;
+
     // Default constructor: Creates an empty vector with initial capacity
     template <typename... Args>
     MmappedVector(Args&&... args);
@@ -163,22 +166,22 @@ bool MmappedVector<T, AllocatorType, thread_safe>::empty() const {
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 T& MmappedVector<T, AllocatorType, thread_safe>::front() {
-    return allocator[0];
+    return allocator.ptr[0];
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T& MmappedVector<T, AllocatorType, thread_safe>::front() const {
-    return allocator[0];
+    return allocator.ptr[0];
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 T& MmappedVector<T, AllocatorType, thread_safe>::back() {
-    return allocator[element_count - 1];
+    return allocator.ptr[element_count - 1];
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T& MmappedVector<T, AllocatorType, thread_safe>::back() const {
-    return allocator[element_count - 1];
+    return allocator.ptr[element_count - 1];
 };
 
 // TODO shrink if needed
@@ -249,7 +252,7 @@ T& MmappedVector<T, AllocatorType, thread_safe>::at(size_t pos) {
     if (pos >= element_count) {
         throw std::out_of_range("MmappedVector::at: index out of range");
     }
-    return allocator[pos];
+    return allocator.ptr[pos];
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
@@ -274,7 +277,27 @@ bool MmappedVector<T, AllocatorType, thread_safe>::operator!=(const MmappedVecto
     return !(*this == other);
 };
 
+template <typename T, typename AllocatorType, bool thread_safe>
+template<typename... Args> inline
+void MmappedVector<T, AllocatorType, thread_safe>::emplace_back(Args&&... args) {
+    if constexpr(thread_safe) {
+        throw std::runtime_error("Not implemented");
+    } else {
+        if (element_count >= allocator.get_capacity())
+            allocator.increase_capacity(element_count + 1);
+        new(&allocator.ptr[element_count++]) T(std::forward<Args>(args)...);
+    }
+};
 
 
+
+template <typename T>
+using MallocVector = MmappedVector<T, MallocAllocator<T>>;
+
+template <typename T>
+using MmapVector = MmappedVector<T, MmapAllocator<T>>;
+
+template <typename T>
+using MmapFileVector = MmappedVector<T, MmapFileAllocator<T>>;
 
 } // namespace mmapped_vector
