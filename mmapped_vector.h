@@ -24,6 +24,14 @@ private:
 public:
     // Data type
     using value_type = T;
+    using allocator_type = AllocatorType;
+    using size_type = size_t;
+    using difference_type = ptrdiff_t;
+    using reference = T&;
+    using const_reference = const T&;
+    using pointer = T*;
+    using const_pointer = const T*;
+
 
     // Default constructor: Creates an empty vector with initial capacity
     template <typename... Args>
