@@ -45,7 +45,7 @@ public:
     MmappedVector& operator=(const MmappedVector& other) = delete;
 
     // Move constructor
-    MmappedVector(MmappedVector&& other) noexcept = delete;
+    MmappedVector(MmappedVector&& other) noexcept;
 
     // Move assignment operator
     MmappedVector& operator=(MmappedVector&& other) noexcept = delete;
@@ -122,6 +122,16 @@ template <typename T, typename AllocatorType, bool thread_safe>
 template <typename... Args>
 MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(Args&&... args)
     : allocator(std::forward<Args>(args)...), element_count(allocator.get_backing_size()) {};
+
+
+template <typename T, typename AllocatorType, bool thread_safe>
+MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(MmappedVector&& other) noexcept
+    : allocator(std::move(other.allocator)), element_count(other.element_count) {
+    if constexpr(thread_safe) {
+        throw std::runtime_error("Not implemented");
+    }
+    other.element_count = 0;
+};
 
 
 template <typename T, typename AllocatorType, bool thread_safe>
