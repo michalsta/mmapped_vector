@@ -190,7 +190,7 @@ void MmappedVector<T, AllocatorType, thread_safe>::clear() {
 // TODO probably needs to be deleted
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::resize(size_t new_size) {
-    //allocator.resize(new_size);
+    allocator.resize(new_size);
     element_count = new_size;
 };
 
@@ -201,7 +201,7 @@ void MmappedVector<T, AllocatorType, thread_safe>::reserve(size_t new_capacity) 
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::shrink_to_fit() {
-    //allocator.resize(element_count);
+    allocator.resize(element_count);
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
