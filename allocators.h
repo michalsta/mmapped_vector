@@ -114,7 +114,8 @@ public:
     MmapAllocator();
     MmapAllocator(int flags);
     MmapAllocator(const MmapAllocator&) = delete;
-    MmapAllocator(MmapAllocator&&);
+    MmapAllocator(MmapAllocator&&) noexcept;
+    MmapAllocator& operator=(MmapAllocator&& other) noexcept;
     ~MmapAllocator() override;
     MmapAllocator& operator=(const MmapAllocator&) = delete;
 
@@ -149,11 +150,25 @@ MmapAllocator<T>::MmapAllocator(int flags) : Allocator<T>() {
 }
 
 template <typename T>
-MmapAllocator<T>::MmapAllocator(MmapAllocator&& other) : Allocator<T>() {
+MmapAllocator<T>::MmapAllocator(MmapAllocator&& other) noexcept : Allocator<T>() {
     this->ptr = other.ptr;
     this->capacity = other.capacity;
     other.ptr = nullptr;
     other.capacity = 0;
+}
+
+template <typename T>
+MmapAllocator<T>& MmapAllocator<T>::operator=(MmapAllocator&& other) noexcept {
+    if (this != &other) {
+        if (this->ptr) {
+            munmap(this->ptr, this->capacity * sizeof(T));
+        }
+        this->ptr = other.ptr;
+        this->capacity = other.capacity;
+        other.ptr = nullptr;
+        other.capacity = 0;
+    }
+    return *this;
 }
 
 template <typename T>
@@ -216,7 +231,8 @@ public:
     MmapFileAllocator();
     MmapFileAllocator(const std::string& file_name, int mmap_flags, int open_flags = O_RDWR | O_CREAT, mode_t mode = S_IRUSR | S_IWUSR);
     MmapFileAllocator(const MmapFileAllocator&) = delete;
-    MmapFileAllocator(MmapFileAllocator&&);
+    MmapFileAllocator(MmapFileAllocator&&) noexcept;
+    MmapFileAllocator& operator=(MmapFileAllocator&&) noexcept;
     ~MmapFileAllocator() override;
     MmapFileAllocator& operator=(const MmapFileAllocator&) = delete;
 
@@ -227,6 +243,7 @@ public:
     friend class MmappedVector<T, MmapFileAllocator, false>;
     friend class MmappedVector<T, MmapFileAllocator, true>;
 private:
+    void self_close() noexcept;
     std::string file_name;
     int file_descriptor;
     size_t backing_size;
@@ -275,7 +292,7 @@ MmapFileAllocator<T>::MmapFileAllocator(const std::string& file_name, int mmap_f
 }
 
 template <typename T>
-MmapFileAllocator<T>::MmapFileAllocator(MmapFileAllocator&& other) : Allocator<T>() {
+MmapFileAllocator<T>::MmapFileAllocator(MmapFileAllocator&& other) noexcept : Allocator<T>() {
     this->ptr = other.ptr;
     this->capacity = other.capacity;
     this->backing_size = other.backing_size;
@@ -288,7 +305,24 @@ MmapFileAllocator<T>::MmapFileAllocator(MmapFileAllocator&& other) : Allocator<T
 }
 
 template <typename T>
-MmapFileAllocator<T>::~MmapFileAllocator() {
+MmapFileAllocator<T>& MmapFileAllocator<T>::operator=(MmapFileAllocator&& other) noexcept {
+    if (this != &other) {
+        self_close();
+        this->ptr = other.ptr;
+        this->capacity = other.capacity;
+        this->backing_size = other.backing_size;
+        this->file_name = std::move(other.file_name);
+        this->file_descriptor = other.file_descriptor;
+        other.ptr = nullptr;
+        other.capacity = 0;
+        other.backing_size = 0;
+        other.file_descriptor = -1;
+    }
+    return *this;
+}
+
+template <typename T>
+void MmapFileAllocator<T>::self_close() noexcept {
     if (this->ptr) {
         this->resize(this->get_backing_size()); // Truncate the file to the actual size
         munmap(this->ptr, this->get_backing_size() * sizeof(T));
@@ -300,6 +334,12 @@ MmapFileAllocator<T>::~MmapFileAllocator() {
             this->file_descriptor = -1;
         }
     }
+}
+
+
+template <typename T>
+MmapFileAllocator<T>::~MmapFileAllocator() {
+    self_close();
 }
 
 template <typename T>
@@ -344,7 +384,8 @@ class MallocAllocator : public Allocator<T>
 public:
     MallocAllocator();
     MallocAllocator(const MallocAllocator&) = delete;   // Copy constructor is not allowed unless elided
-    MallocAllocator(MallocAllocator&&);
+    MallocAllocator(MallocAllocator&&) noexcept;
+    MallocAllocator& operator=(MallocAllocator&&) noexcept;
     ~MallocAllocator() override;
     MallocAllocator& operator=(const MallocAllocator&) = delete;
 
@@ -365,11 +406,25 @@ MallocAllocator<T>::MallocAllocator() : Allocator<T>() {
 }
 
 template <typename T>
-MallocAllocator<T>::MallocAllocator(MallocAllocator&& other) : Allocator<T>() {
+MallocAllocator<T>::MallocAllocator(MallocAllocator&& other) noexcept : Allocator<T>() {
     this->ptr = other.ptr;
     this->capacity = other.capacity;
     other.ptr = nullptr;
     other.capacity = 0;
+}
+
+template <typename T>
+MallocAllocator<T>& MallocAllocator<T>::operator=(MallocAllocator&& other) noexcept {
+    if (this != &other) {
+        if (this->ptr) {
+            free(this->ptr);
+        }
+        this->ptr = other.ptr;
+        this->capacity = other.capacity;
+        other.ptr = nullptr;
+        other.capacity = 0;
+    }
+    return *this;
 }
 
 template <typename T>

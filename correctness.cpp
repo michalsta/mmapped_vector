@@ -92,54 +92,33 @@ void run_tests()
     assert(vec.capacity() >= 1);
     assert(vec.empty());
 
-#if 0
-    // Test copy constructor
+    // Skip testing copy constructor
+    // Test move constructor
     vec.push_back(1);
     vec.push_back(2);
-    VectorType vec2 = vec;
+    VectorType vec2(std::move(vec));
+    assert(vec.size() == 0);
+    assert(vec.capacity() >= 0);
+    assert(vec.empty());
     assert(vec2.size() == 2);
     assert(vec2.capacity() >= 2);
     assert(!vec2.empty());
     assert(vec2[0] == 1);
     assert(vec2[1] == 2);
 
-
-    // Test move constructor
-    /*
-    VectorType vec3 = std::move(vec2);
-    assert(vec3.size() == 2);
-    assert(vec3.capacity() >= 2);
-    assert(!vec3.empty());
-    assert(vec3[0] == 1);
-    assert(vec3[1] == 2);
+    // Skip testing copy assignment operator
+    // Test move assignment operator
+    vec = std::move(vec2);
     assert(vec2.size() == 0);
-    assert(vec2.capacity() >= 2);
-    assert(vec2.empty());*/
+    assert(vec2.capacity() >= 0);
+    assert(vec2.empty());
+    assert(vec.size() == 2);
+    assert(vec.capacity() >= 2);
+    assert(!vec.empty());
+    assert(vec[0] == 1);
+    assert(vec[1] == 2);
 
-    // Test copy assignment
-    vec2 = vec3;
-    assert(vec2.size() == 2);
-    assert(vec2.capacity() >= 2);
-    assert(!vec2.empty());
-    assert(vec2[0] == 1);
-    assert(vec2[1] == 2);
 
-    // Test move assignment
-    /* vec3 = std::move(vec2);
-    assert(vec3.size() == 2);
-    assert(vec3.capacity() >= 2);
-    assert(!vec3.empty());
-    assert(vec3[0] == 1);
-    assert(vec3[1] == 2);
-    assert(vec2.size() == 0);
-    assert(vec2.capacity() >= 2);
-    assert(vec2.empty()); */
-
-    // Test == and !=
-    assert(vec == vec3);
-    assert(vec != vec2);
-    assert(vec2 != vec3);
-#endif
 }
 
 

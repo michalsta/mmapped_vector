@@ -48,7 +48,7 @@ public:
     MmappedVector(MmappedVector&& other) noexcept;
 
     // Move assignment operator
-    MmappedVector& operator=(MmappedVector&& other) noexcept = delete;
+    MmappedVector& operator=(MmappedVector&& other) noexcept;
 
     // Adds an element to the end of the vector
     void push_back(const T& value);
@@ -133,6 +133,19 @@ MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(MmappedVector&& othe
     other.element_count = 0;
 };
 
+template <typename T, typename AllocatorType, bool thread_safe>
+MmappedVector<T, AllocatorType, thread_safe>& MmappedVector<T, AllocatorType, thread_safe>::operator=(MmappedVector&& other) noexcept {
+    if constexpr(thread_safe) {
+        throw std::runtime_error("Not implemented");
+    }
+    if (this != &other) {
+        allocator = std::move(other.allocator);
+        element_count = other.element_count;
+
+        other.element_count = 0;
+    }
+    return *this;
+};
 
 template <typename T, typename AllocatorType, bool thread_safe>
 MmappedVector<T, AllocatorType, thread_safe>::~MmappedVector() { allocator.sync(this->element_count); };
