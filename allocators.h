@@ -54,7 +54,7 @@ public:
     Allocator& operator=(const Allocator&) = delete;
 
 
-    virtual T* resize(size_t new_size) = 0;
+    virtual void resize(size_t new_size) = 0;
     void increase_capacity(size_t capacity_needed);
     size_t get_capacity() const;
     T* get_ptr() const;
@@ -119,7 +119,7 @@ public:
     ~MmapAllocator() override;
     MmapAllocator& operator=(const MmapAllocator&) = delete;
 
-    T* resize(size_t new_size) override;
+    void resize(size_t new_size) override;
 
     friend class MmappedVector<T, MmapAllocator, false>;
     friend class MmappedVector<T, MmapAllocator, true>;
@@ -181,8 +181,8 @@ MmapAllocator<T>::~MmapAllocator() {
 }
 
 template <typename T>
-T* MmapAllocator<T>::resize(size_t new_capacity) {
-    if (new_capacity == this->capacity) return this->ptr;
+void MmapAllocator<T>::resize(size_t new_capacity) {
+    if (new_capacity == this->capacity) return;
 
 #ifdef MREMAP_MAYMOVE
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
@@ -214,7 +214,6 @@ T* MmapAllocator<T>::resize(size_t new_capacity) {
 #endif
 
     this->capacity = new_capacity;
-    return this->ptr;
 }
 
 
@@ -235,7 +234,7 @@ public:
     ~MmapFileAllocator() override;
     MmapFileAllocator& operator=(const MmapFileAllocator&) = delete;
 
-    T* resize(size_t new_size) override;
+    void resize(size_t new_size) override;
     size_t get_backing_size() const override;
     void sync(size_t used_elements) override;
 
@@ -340,8 +339,8 @@ MmapFileAllocator<T>::~MmapFileAllocator() {
 }
 
 template <typename T>
-T* MmapFileAllocator<T>::resize(size_t new_capacity) {
-    if (new_capacity == this->capacity) return this->ptr;
+void MmapFileAllocator<T>::resize(size_t new_capacity) {
+    if (new_capacity == this->capacity) return;
 
     if (ftruncate(this->file_descriptor, new_capacity * sizeof(T)) == -1)
         throw std::runtime_error("MmapFileAllocator::resize: ftruncate failed: " + mmapped_vector::get_error_message("ftruncate"));
@@ -362,7 +361,6 @@ T* MmapFileAllocator<T>::resize(size_t new_capacity) {
 
     this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
-    return this->ptr;
 }
 
 template <typename T>
@@ -386,7 +384,7 @@ public:
     ~MallocAllocator() override;
     MallocAllocator& operator=(const MallocAllocator&) = delete;
 
-    T* resize(size_t new_size) override;
+    void resize(size_t new_size) override;
 
     friend class MmappedVector<T, MallocAllocator, false>;
     friend class MmappedVector<T, MallocAllocator, true>;
@@ -435,8 +433,8 @@ MallocAllocator<T>::~MallocAllocator() {
 }
 
 template <typename T>
-T* MallocAllocator<T>::resize(size_t new_capacity) {
-    if (new_capacity == this->capacity) return this->ptr;
+void MallocAllocator<T>::resize(size_t new_capacity) {
+    if (new_capacity == this->capacity) return;
 
     void* new_ptr = realloc(this->ptr, new_capacity * sizeof(T));
     if (!new_ptr) {
@@ -445,7 +443,6 @@ T* MallocAllocator<T>::resize(size_t new_capacity) {
 
     this->ptr = static_cast<T*>(new_ptr);
     this->capacity = new_capacity;
-    return this->ptr;
 }
 
 } // namespace mmaped_vector
