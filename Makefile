@@ -1,5 +1,6 @@
 headers: allocators.gch mmapped_vector.gch
 
+#CXX=g++-14
 MYCXX=$(CXX) -std=c++20 -Wall -Wextra -fmax-errors=1
 OPT=$(MYCXX) -O3
 DBG=$(MYCXX) -Og -g -D_GLIBCXX_DEBUG

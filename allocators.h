@@ -228,8 +228,7 @@ template <typename T>
 class MmapFileAllocator : public Allocator<T>
 {
 public:
-    MmapFileAllocator();
-    MmapFileAllocator(const std::string& file_name, int mmap_flags, int open_flags = O_RDWR | O_CREAT, mode_t mode = S_IRUSR | S_IWUSR);
+    MmapFileAllocator(const std::string& file_name, int mmap_flags = MAP_SHARED, int open_flags = O_RDWR | O_CREAT, mode_t mode = S_IRUSR | S_IWUSR);
     MmapFileAllocator(const MmapFileAllocator&) = delete;
     MmapFileAllocator(MmapFileAllocator&&) noexcept;
     MmapFileAllocator& operator=(MmapFileAllocator&&) noexcept;
@@ -255,14 +254,12 @@ size_t MmapFileAllocator<T>::get_backing_size() const {
 }
 
 template <typename T>
-MmapFileAllocator<T>::MmapFileAllocator() : MmapFileAllocator<T>("", MAP_SHARED, O_RDWR | O_CREAT) {};
-
-template <typename T>
 MmapFileAllocator<T>::MmapFileAllocator(const std::string& file_name, int mmap_flags, int open_flags, mode_t mode) : Allocator<T>() {
 
     RAIIFileDescriptor fd(open(file_name.c_str(), open_flags, mode));
     if (fd.get() == -1) {
-        throw std::runtime_error("MmapFileAllocator::ctor: open failed: " + mmapped_vector::get_error_message("open"));
+        std::string error_message = "MmapFileAllocator::ctor: " + file_name + ": " + mmapped_vector::get_error_message("open");
+        throw std::runtime_error(error_message);
     }
 
     struct stat st;

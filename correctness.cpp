@@ -25,6 +25,7 @@ mmapped_vector::MmappedVector<T, mmapped_vector::MmapFileAllocator<T>> mmap_file
 
 template <typename VectorType>
 VectorType empty() {
+    static int test_file_no = 0;
     if constexpr (std::is_same<VectorType, std::vector<typename VectorType::value_type>>::value) {
         return std::vector<typename VectorType::value_type>();
     } else if constexpr (std::is_same<VectorType, mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MallocAllocator<typename VectorType::value_type>>>::value) {
@@ -32,7 +33,8 @@ VectorType empty() {
     } else if constexpr (std::is_same<VectorType, mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapAllocator<typename VectorType::value_type>>>::value) {
         return mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapAllocator<typename VectorType::value_type>>();
     } else if constexpr (std::is_same<VectorType, mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapFileAllocator<typename VectorType::value_type>>>::value) {
-        return mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapFileAllocator<typename VectorType::value_type>>("test.dat", MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, 0);
+        std::string file_name = "test" + std::to_string(test_file_no++) + ".dat";
+        return mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapFileAllocator<typename VectorType::value_type>>(file_name, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     } else {
         throw std::runtime_error("empty() not implemented for this type");
     }
@@ -118,6 +120,38 @@ void run_tests()
     assert(vec[0] == 1);
     assert(vec[1] == 2);
 
+    // Test resize
+    vec.resize(1);
+    assert(vec.size() == 1);
+    assert(vec.capacity() >= 1);
+    assert(!vec.empty());
+    assert(vec[0] == 1);
+
+    // Test destructor
+    VectorType* vec_ptr = new VectorType(empty<VectorType>());
+    vec_ptr->push_back(1);
+    delete vec_ptr;
+
+    // Test operator[]
+    assert(vec[0] == 1);
+
+    // Test operator==
+    VectorType vec3 = empty<VectorType>();
+    vec.push_back(2);
+    vec3.push_back(1);
+    vec3.push_back(2);
+    assert(vec == vec3);
+    vec3.push_back(3);
+    assert(!(vec == vec3));
+
+    // Test operator!=
+    assert(vec != vec3);
+    vec.push_back(3);
+    assert(!(vec != vec3));
+
+    // Test cend
+    assert(vec.cend() == vec.begin() + vec.size());
+
 
 }
 
@@ -127,13 +161,13 @@ int main()
     std::cerr << "Running tests for std::vector" << std::endl;
     run_tests<std::vector<int>>();
     std::cerr << "done" << std::endl;
-    std::cerr << "Running tests for MmappedVector" << std::endl;
+    std::cerr << "Running tests for MmappedVector (MallocAllocator)" << std::endl;
     run_tests<mmapped_vector::MmappedVector<int, mmapped_vector::MallocAllocator<int>>>();
     std::cerr << "done" << std::endl;
-    std::cerr << "Running tests for MmappedVector" << std::endl;
+    std::cerr << "Running tests for MmappedVector (MmapAllocator)" << std::endl;
     run_tests<mmapped_vector::MmappedVector<int, mmapped_vector::MmapAllocator<int>>>();
     std::cerr << "done" << std::endl;
-    std::cerr << "Running tests for MmappedVector" << std::endl;
+    std::cerr << "Running tests for MmappedVector (MmapFileAllocator)" << std::endl;
     run_tests<mmapped_vector::MmappedVector<int, mmapped_vector::MmapFileAllocator<int>>>();
     std::cerr << "done" << std::endl;
 
