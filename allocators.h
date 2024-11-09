@@ -32,7 +32,6 @@
 #include <new>
 
 
-
 namespace mmapped_vector {
 
 
@@ -40,6 +39,9 @@ static const size_t page_size = getpagesize();
 
 template <typename T, typename AllocatorType, bool thread_safe>
 class MmappedVector;
+
+template <typename T, typename AllocatorType>
+class IndexHolder;
 
 template <typename T>
 class Allocator
@@ -63,6 +65,7 @@ public:
 
     friend class MmappedVector<T, Allocator, false>;
     friend class MmappedVector<T, Allocator, true>;
+    friend class IndexHolder<T, Allocator>;
 };
 
 

@@ -7,10 +7,31 @@
 #include <cstring> // for std::memcpy
 #include <mutex>
 #include <atomic>
+#include <algorithm>
+
 
 #include "allocators.h"
 
+
+#define USE_INELEGANT_IMPLEMENTATION 1
+//#define MEMORY_ORDER std::memory_order_seq_cst
+#define MEMORY_ORDER std::memory_order_relaxed
+//#define MEMORY_ORDER std::memory_order_acq_rel
+
+template <typename T>
+void atomic_store_max(std::atomic<T>& target, T value) {
+    T current = target.load(MEMORY_ORDER);
+    while (value > current) {
+        if (target.compare_exchange_weak(current, value, MEMORY_ORDER)) {
+            break;
+        }
+    }
+}
+
 namespace mmapped_vector {
+
+template <typename T, typename AllocatorType>
+class IndexHolder;
 
 template <typename T, typename AllocatorType, bool thread_safe = false>
 class MmappedVector {
@@ -20,6 +41,10 @@ class MmappedVector {
 private:
     AllocatorType allocator;
     std::conditional_t<thread_safe, std::atomic<size_t>, size_t> element_count;
+    std::conditional_t<thread_safe, std::atomic<size_t>, std::monostate> capacity_atomic;
+    std::conditional_t<thread_safe, std::atomic<size_t>, std::monostate> operations_in_progress;
+    std::conditional_t<thread_safe, std::atomic<size_t>, std::monostate> needed_capacity;
+    std::conditional_t<thread_safe, std::mutex, std::monostate> mutex;
 
 public:
     // Data type
@@ -113,6 +138,9 @@ public:
     bool operator==(const MmappedVector& other) const;
     bool operator!=(const MmappedVector& other) const;
 
+    void store_at_index(const T& value, size_t index);
+
+    friend class IndexHolder<T, AllocatorType>;
 private:
 };
 
@@ -121,7 +149,13 @@ private:
 template <typename T, typename AllocatorType, bool thread_safe>
 template <typename... Args>
 MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(Args&&... args)
-    : allocator(std::forward<Args>(args)...), element_count(allocator.get_backing_size()) {};
+    : allocator(std::forward<Args>(args)...), element_count(allocator.get_backing_size()) {
+        if constexpr(thread_safe) {
+            capacity_atomic.store(allocator.get_capacity(), MEMORY_ORDER);
+            needed_capacity.store(allocator.get_capacity(), MEMORY_ORDER);
+            operations_in_progress.store(0, MEMORY_ORDER);
+        }
+    };
 
 
 template <typename T, typename AllocatorType, bool thread_safe>
@@ -161,10 +195,49 @@ T& MmappedVector<T, AllocatorType, thread_safe>::operator[](size_t index) {
 };
 
 
+#if USE_INELEGANT_IMPLEMENTATION
+template <typename T, typename AllocatorType, bool thread_safe>
+void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value, size_t index) {
+    if constexpr(!thread_safe) {
+        throw std::runtime_error("This function should only be called in thread-safe mode");
+    }
+    operations_in_progress.fetch_add(1, MEMORY_ORDER);
+    size_t current_capacity = capacity_atomic.load(MEMORY_ORDER);
+    if (index < current_capacity) {
+        allocator.ptr[index] = value;
+        operations_in_progress.fetch_sub(1, MEMORY_ORDER);
+    } else {
+        atomic_store_max(needed_capacity, index + 1);
+        size_t active_workers = operations_in_progress.fetch_sub(1, MEMORY_ORDER);
+        if (active_workers > 1) {
+            while (capacity_atomic.load(MEMORY_ORDER) <= index) {};
+        } else {
+            std::lock_guard<std::mutex> lock(mutex);
+            allocator.increase_capacity(std::max(needed_capacity.load(MEMORY_ORDER), index + 1));
+            capacity_atomic.store(allocator.get_capacity(), MEMORY_ORDER);
+            store_at_index(value, index);
+        }
+    }
+};
+
+#else
+
+template <typename T, typename AllocatorType, bool thread_safe>
+inline void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value, size_t index) {
+    if constexpr(!thread_safe) {
+        throw std::runtime_error("This function should only be called in thread-safe mode");
+    }
+    IndexHolder<T, AllocatorType> holder(*this, index);
+    allocator.ptr[index] = value;
+};
+
+#endif
+
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::push_back(const T& value) {
     if constexpr(thread_safe) {
-        throw std::runtime_error("Not implemented");
+        size_t index = element_count.fetch_add(1, MEMORY_ORDER);
+        store_at_index(value, index);
     } else {
         if (element_count >= allocator.get_capacity())
             allocator.increase_capacity(element_count + 1);
@@ -330,5 +403,38 @@ using MmapVector = MmappedVector<T, MmapAllocator<T>>;
 
 template <typename T>
 using MmapFileVector = MmappedVector<T, MmapFileAllocator<T>>;
+
+
+
+template<typename T, typename AllocatorType>
+class IndexHolder {
+    MmappedVector<T, AllocatorType, true>& vec;
+public:
+    inline IndexHolder(MmappedVector<T, AllocatorType, true>& vec, size_t index) : vec(vec) {
+
+        vec.operations_in_progress.fetch_add(1, MEMORY_ORDER);
+        size_t current_capacity = vec.capacity_atomic.load(MEMORY_ORDER);
+        if (index >= current_capacity)
+            slow_path(index);
+    }
+
+    inline void slow_path(size_t index) {
+        atomic_store_max(vec.needed_capacity, index + 1);
+        size_t active_workers = vec.operations_in_progress.fetch_sub(1, MEMORY_ORDER);
+        if (active_workers > 1) {
+            while (vec.capacity_atomic.load(MEMORY_ORDER) <= index) {};
+        } else {
+            std::lock_guard<std::mutex> lock(vec.mutex);
+            vec.allocator.increase_capacity(std::max(vec.needed_capacity.load(MEMORY_ORDER), index + 1));
+            vec.capacity_atomic.store(vec.allocator.get_capacity(), MEMORY_ORDER);
+        }
+        vec.operations_in_progress.fetch_add(1, MEMORY_ORDER);
+    }
+
+    inline ~IndexHolder() {
+        vec.operations_in_progress.fetch_sub(1, MEMORY_ORDER);
+    }
+
+};
 
 } // namespace mmapped_vector
