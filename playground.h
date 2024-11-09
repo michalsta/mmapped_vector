@@ -3,6 +3,7 @@
 #include <atomic>
 #include <mutex>
 #include <algorithm>
+#include "allocators.h"
 
 template <typename VectorType>
 void test_vector_correctness(VectorType& vec);
@@ -37,6 +38,7 @@ public:
     }
 
     // Push n elements from iterator
+    /*
     template <typename Iterator>
     void push_back(Iterator begin, Iterator end) {
         size_t n = std::distance(begin, end);
@@ -49,7 +51,7 @@ public:
             ptr[place_idx++] = *begin++;
         }
         pushes_done += n;
-    }
+    }*/
 
     void increase_capacity(size_t needed_idx, size_t reserved_pushes) {
         pushes_done += reserved_pushes;
@@ -132,5 +134,56 @@ public:
     }
 };
 
+
+template <typename T>
+class ThreadSafeMmapVector {
+    mmapped_vector::MmapAllocator<T> allocator;
+    std::atomic<size_t> element_count;
+    const size_t max_size = 4'398'046'511'104;
+public:
+    ThreadSafeMmapVector() : allocator() {
+        element_count.store(0);
+        allocator.resize(max_size);
+    }
+
+    void push_back(const T& value) {
+        size_t place_idx = element_count.fetch_add(1, std::memory_order_relaxed);
+        allocator.get_ptr()[place_idx] = value;
+    }
+
+    T& operator[](size_t idx) {
+        return allocator.get_ptr()[idx];
+    }
+
+    friend void test_vector_correctness<>(ThreadSafeMmapVector<T>& vec);
+};
+
 // write correctness tests for ThreadSafeVector, mixing push_back() and push_back(iterator, iterator), multithreaded
 // and checking the results
+
+
+#include <chrono>
+#include <string>
+
+class Timer {
+public:
+    // Constructor starts the timer
+    Timer(const std::string& name = "")
+        : name(name), start(std::chrono::high_resolution_clock::now()) {}
+
+    // Destructor stops the timer and logs the elapsed time
+    ~Timer() {
+        std::cout << "Elapsed time" << (name.empty() ? "" : " for " + name)
+                  << ": " << getElapsedTime() / 1000000.0 << " seconds\n";
+    }
+
+    // Method to get the current elapsed time in microseconds
+    long long getElapsedTime() const {
+        auto now = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration_cast<std::chrono::microseconds>(now - start).count();
+    }
+
+private:
+    std::string name;
+    std::chrono::time_point<std::chrono::high_resolution_clock> start;
+};

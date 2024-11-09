@@ -3,6 +3,7 @@
 #include <chrono>
 #include <thread>
 #include <mutex>
+#include <tbb/concurrent_vector.h>
 
 #include "mmapped_vector.h"
 #include "playground.h"
@@ -11,21 +12,22 @@
 // Write performance tests for MmappedVector with MallocAllocator and MmapAllocator, multithreaded
 // compared to std::vector guarded by std::mutex
 
-#define NO_THREADS 1
-#define TEST_SIZE 10000000
+//#define NO_THREADS 300
+#define NO_THREADS 4
+#define TEST_SIZE 30000000
 
 using namespace mmapped_vector;
 template <typename VectorType>
 void test_vector_correctness(VectorType& vec) {
     //spawn threads
-    const size_t thread_count = 4;
+    const size_t thread_count = NO_THREADS;
     std::vector<std::thread> threads;
     for (size_t i = 0; i < thread_count; ++i) {
-        threads.push_back(std::thread([&vec]() {
-            for (size_t i = 0; i < 1000000; ++i) {
+//        threads.push_back(std::thread([&vec]() {
+            for (size_t i = 0; i < TEST_SIZE; ++i) {
                 vec.push_back(i);
             }
-        }));
+//        }));
     }
     /*for (size_t i = 0; i < thread_count; ++i) {
         threads.push_back(std::thread([&vec]() {
@@ -43,7 +45,7 @@ void test_vector_correctness(VectorType& vec) {
         thread.join();
     }
     size_t sum = 0;
-    for (size_t i = 0; i < 4000000; ++i) {
+    for (size_t i = 0; i < TEST_SIZE * thread_count; ++i) {
         sum += vec[i];
     }
     std::cout << "Sum: " << sum << std::endl;
@@ -69,6 +71,14 @@ double test_vector_performance(VectorType& vec) {
     return duration.count();
 }
 
+template <typename MmappedVector>
+void print_vector(const MmappedVector& vec) {
+    for (const auto& elem : vec) {
+        std::cout << elem << " ";
+    }
+    std::cout << std::endl;
+}
+
 int main() {
     std::string test_file = "/home/mist/test.dat";
     struct TestResult {
@@ -87,16 +97,46 @@ int main() {
     results.push_back({"mmapped_vector (FileAllocator, thread_safe)", test_vector_performance(vec3)});
     remove(test_file.c_str());
 */
+/*
+    std::cerr << "Running tests for ThreadSafeVector" << std::endl;
     ThreadSafeVector<size_t> vec4;
     results.push_back({"ThreadSafeVector", test_vector_performance(vec4)});
-    std::vector<size_t> vec5;
-    results.push_back({"std::vector", test_vector_performance(vec5)});
+    std::cerr << "done" << std::endl; */
+    //std::cerr << "Running tests for std::vector" << std::endl;
+    //std::vector<size_t> vec5;
+    //results.push_back({"std::vector", test_vector_performance(vec5)});
+    //std::cerr << "done" << std::endl;
+/*    std::cerr << "Running tests for ThreadSafeVector" << std::endl;
     ThreadSafeVector<size_t> vec6;
     test_vector_correctness(vec6);
+    std::cerr << "done" << std::endl; */
+    std::cerr << "Inelegant implementation: " << USE_INELEGANT_IMPLEMENTATION << std::endl;
+    {
+    Timer t("Running tests for MutexedVector");
     MutexedVector<size_t> vec7;
     test_vector_correctness(vec7);
-    MmappedVector<size_t, MallocAllocator<size_t, true>, true> vec8;
+    }
+    std::cerr << "done" << std::endl;
+    {Timer t("Running tests for MmappedVector (MallocAllocator)");
+    MmappedVector<size_t, MallocAllocator<size_t>, true> vec8;
     test_vector_correctness(vec8);
+    }
+    {
+    Timer t("Running tests for Intel TBB concurrent_vector");
+    tbb::concurrent_vector<size_t> vec9;
+    test_vector_correctness(vec9);
+    }
+    {
+    Timer t("Running tests for MmappedVector (MmapAllocator)");
+    MmappedVector<size_t, MmapAllocator<size_t>, true> vec10;
+    test_vector_correctness(vec10);
+    }
+    {
+    Timer t("Running tests for ThreadSafeMmapVector");
+    ThreadSafeMmapVector<size_t> vec11;
+    test_vector_correctness(vec11);
+    }
+    //print_vector(vec8);
     #if 0
     //MmappedVector<size_t, MmapAllocator<size_t, true>, true> vec9;
     //test_vector_correctness(vec9);
