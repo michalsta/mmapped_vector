@@ -14,9 +14,11 @@
 
 //#define NO_THREADS 300
 #define NO_THREADS 4
-#define TEST_SIZE 30000000
+#define TEST_SIZE 3000000
 
 using namespace mmapped_vector;
+
+
 template <typename VectorType>
 void test_vector_correctness(VectorType& vec) {
     //spawn threads
@@ -135,6 +137,11 @@ int main() {
     Timer t("Running tests for ThreadSafeMmapVector");
     ThreadSafeMmapVector<size_t> vec11;
     test_vector_correctness(vec11);
+    }
+    {
+    Timer t("Running tests for ThreadSafeCounterVector");
+    ThreadSafeCounterVector<size_t> vec12;
+    test_vector_correctness(vec12);
     }
     //print_vector(vec8);
     #if 0

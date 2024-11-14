@@ -158,6 +158,39 @@ public:
     friend void test_vector_correctness<>(ThreadSafeMmapVector<T>& vec);
 };
 
+template <typename T>
+class ThreadSafeCounterVector {
+    mmapped_vector::MallocAllocator<T> allocator;
+    std::atomic<size_t> element_count;
+    std::atomic<size_t> pushes_done;
+    std::atomic<size_t> capacity;
+
+public:
+    ThreadSafeCounterVector() : allocator() {
+        element_count.store(0);
+        allocator.resize(16);
+        capacity.store(allocator.get_capacity());
+        pushes_done.store(0);
+    }
+
+    void push_back(const T& value) {
+        size_t place_idx = element_count.fetch_add(1, std::memory_order_relaxed);
+        size_t local_capacity;
+        while(place_idx >= (local_capacity = capacity.load())) {};
+        allocator.get_ptr()[place_idx] = value;
+        size_t local_pushes_done = pushes_done.fetch_add(1, std::memory_order_relaxed);
+        if (local_pushes_done + 1 == local_capacity) {
+            allocator.increase_capacity(std::max(allocator.get_capacity(), place_idx) + 1);
+            capacity.store(allocator.get_capacity());
+        }
+    }
+
+    T& operator[](size_t idx) {
+        return allocator.get_ptr()[idx];
+    }
+    friend void test_vector_correctness<>(ThreadSafeMmapVector<T>& vec);
+};
+
 // write correctness tests for ThreadSafeVector, mixing push_back() and push_back(iterator, iterator), multithreaded
 // and checking the results
 

@@ -26,6 +26,7 @@
 
 #endif
 
+#define MMV_DEBUG 0
 
 #include "error_handling.h"
 #include "misc.h"
@@ -97,7 +98,11 @@ void Allocator<T>::increase_capacity(size_t capacity_needed) {
     else
         new_capacity = this->capacity;
     while(new_capacity < capacity_needed)
+#if MMV_DEBUG
+        new_capacity += 16;
+#else
         new_capacity *= 2;
+#endif
     resize(new_capacity);
 }
 

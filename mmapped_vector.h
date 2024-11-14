@@ -13,14 +13,22 @@
 #include "allocators.h"
 
 
-#define USE_INELEGANT_IMPLEMENTATION 1
-//#define MEMORY_ORDER std::memory_order_seq_cst
-#define MEMORY_ORDER std::memory_order_relaxed
+#define USE_INELEGANT_IMPLEMENTATION 0
+#define MEMORY_ORDER std::memory_order_seq_cst
+//#define MEMORY_ORDER std::memory_order_relaxed
 //#define MEMORY_ORDER std::memory_order_acq_rel
+//#define MEMORY_ORDER_ACQ std::memory_order_acquire
+//#define MEMORY_ORDER_REL std::memory_order_release
+//#define MEMORY_ORDER_ACQ_REL std::memory_order_acq_rel
+#define MEMORY_ORDER_ACQ MEMORY_ORDER
+#define MEMORY_ORDER_REL MEMORY_ORDER
+#define MEMORY_ORDER_ACQ_REL MEMORY_ORDER
 
-template <typename T>
+
+
+template <std::memory_order mem_order, typename T>
 void atomic_store_max(std::atomic<T>& target, T value) {
-    T current = target.load(MEMORY_ORDER);
+    T current = target.load(mem_order);
     while (value > current) {
         if (target.compare_exchange_weak(current, value, MEMORY_ORDER)) {
             break;
@@ -207,9 +215,9 @@ void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value
         allocator.ptr[index] = value;
         operations_in_progress.fetch_sub(1, MEMORY_ORDER);
     } else {
-        atomic_store_max(needed_capacity, index + 1);
         size_t active_workers = operations_in_progress.fetch_sub(1, MEMORY_ORDER);
         if (active_workers > 1) {
+            atomic_store_max<MEMORY_ORDER>(needed_capacity, index + 1);
             while (capacity_atomic.load(MEMORY_ORDER) <= index) {};
         } else {
             std::lock_guard<std::mutex> lock(mutex);
@@ -412,21 +420,21 @@ class IndexHolder {
 public:
     inline IndexHolder(MmappedVector<T, AllocatorType, true>& vec, size_t index) : vec(vec) {
 
-        vec.operations_in_progress.fetch_add(1, MEMORY_ORDER);
-        size_t current_capacity = vec.capacity_atomic.load(MEMORY_ORDER);
+        //vec.operations_in_progress.fetch_add(1, MEMORY_ORDER);
+        size_t current_capacity = vec.capacity_atomic.load(MEMORY_ORDER_ACQ);
         if (index >= current_capacity)
             slow_path(index);
     }
 
     inline void slow_path(size_t index) {
-        atomic_store_max(vec.needed_capacity, index + 1);
-        size_t active_workers = vec.operations_in_progress.fetch_sub(1, MEMORY_ORDER);
-        if (active_workers > 1) {
-            while (vec.capacity_atomic.load(MEMORY_ORDER) <= index) {};
+        // size_t active_workers = vec.operations_in_progress.fetch_sub(1, MEMORY_ORDER);
+        if (false) {//(active_workers > 1) {
+            atomic_store_max<MEMORY_ORDER>(vec.needed_capacity, index + 1);
+            while (vec.capacity_atomic.load(MEMORY_ORDER_ACQ) <= index) {};
         } else {
             std::lock_guard<std::mutex> lock(vec.mutex);
             vec.allocator.increase_capacity(std::max(vec.needed_capacity.load(MEMORY_ORDER), index + 1));
-            vec.capacity_atomic.store(vec.allocator.get_capacity(), MEMORY_ORDER);
+            vec.capacity_atomic.store(vec.allocator.get_capacity(), MEMORY_ORDER_REL);
         }
         vec.operations_in_progress.fetch_add(1, MEMORY_ORDER);
     }
