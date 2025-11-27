@@ -219,6 +219,7 @@ void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value
         if (active_workers > 1) {
             atomic_store_max<MEMORY_ORDER>(needed_capacity, index + 1);
             while (capacity_atomic.load(MEMORY_ORDER) <= index) {};
+            store_at_index(value, index);
         } else {
             std::lock_guard<std::mutex> lock(mutex);
             allocator.increase_capacity(std::max(needed_capacity.load(MEMORY_ORDER), index + 1));
