@@ -373,7 +373,7 @@ const T& MmappedVector<T, AllocatorType, thread_safe>::at(size_t pos) const {
     if (pos >= element_count) {
         throw std::out_of_range("MmappedVector::at: index out of range");
     }
-    return allocator[pos];
+    return allocator.ptr[pos];
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline

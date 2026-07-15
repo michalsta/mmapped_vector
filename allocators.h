@@ -252,6 +252,7 @@ private:
     void self_close() noexcept;
     std::string file_name;
     int file_descriptor;
+    int mmap_flags;
     size_t backing_size;
 };
 
@@ -291,6 +292,7 @@ MmapFileAllocator<T>::MmapFileAllocator(const std::string& file_name, int mmap_f
         throw std::runtime_error("MmapFileAllocator::ctor: mmap failed: " + mmapped_vector::get_error_message("mmap"));
 
     this->file_name = file_name;
+    this->mmap_flags = mmap_flags;
     this->file_descriptor = fd.release();
 
 }
@@ -302,6 +304,7 @@ MmapFileAllocator<T>::MmapFileAllocator(MmapFileAllocator&& other) noexcept : Al
     this->backing_size = other.backing_size;
     this->file_name = std::move(other.file_name);
     this->file_descriptor = other.file_descriptor;
+    this->mmap_flags = other.mmap_flags;
     other.ptr = nullptr;
     other.capacity = 0;
     other.backing_size = 0;
@@ -317,6 +320,7 @@ MmapFileAllocator<T>& MmapFileAllocator<T>::operator=(MmapFileAllocator&& other)
         this->backing_size = other.backing_size;
         this->file_name = std::move(other.file_name);
         this->file_descriptor = other.file_descriptor;
+        this->mmap_flags = other.mmap_flags;
         other.ptr = nullptr;
         other.capacity = 0;
         other.backing_size = 0;
@@ -361,7 +365,8 @@ void MmapFileAllocator<T>::resize(size_t new_capacity) {
 #else
     if(munmap(this->ptr, this->capacity * sizeof(T)) == -1)
         throw std::runtime_error("MmapFileAllocator::resize: munmap failed: " + mmapped_vector::get_error_message("munmap"));
-    void* new_ptr = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, MAP_SHARED, this->file_descriptor, 0);
+    this->ptr = nullptr;  // prevent double-munmap if the re-map below fails
+    void* new_ptr = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, this->mmap_flags, this->file_descriptor, 0);
     if (new_ptr == MAP_FAILED) {
         throw std::runtime_error("MmapFileAllocator::resize: mmap failed: " + mmapped_vector::get_error_message("mmap"));
     }
@@ -453,6 +458,6 @@ void MallocAllocator<T>::resize(size_t new_capacity) {
     this->capacity = new_capacity;
 }
 
-} // namespace mmaped_vector
+} // namespace mmapped_vector
 
 #endif // MMAPPED_VECTOR_ALLOCATORS_H

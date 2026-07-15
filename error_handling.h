@@ -9,7 +9,7 @@
 
 namespace mmapped_vector {
 
-std::string get_error_message(const std::string& operation) {
+inline std::string get_error_message(const std::string& operation) {
     return operation + " failed: " + std::strerror(errno) +
            " (errno: " + std::to_string(errno) + ")";
 }
@@ -20,7 +20,7 @@ inline void throw_if_error(const std::string& operation) {
     }
 }
 
-} // namespace mmaped_vector
+} // namespace mmapped_vector
 
 
 #endif // ERROR_HANDLING_H

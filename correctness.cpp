@@ -19,7 +19,7 @@ mmapped_vector::MmappedVector<T, mmapped_vector::MmapAllocator<T>> mmap_vector()
 
 template <typename T>
 mmapped_vector::MmappedVector<T, mmapped_vector::MmapFileAllocator<T>> mmap_file_vector() {
-    return mmapped_vector::MmappedVector<int, mmapped_vector::MmapFileAllocator<int>>("test.dat", MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, 0);
+    return mmapped_vector::MmappedVector<int, mmapped_vector::MmapFileAllocator<int>>("test.dat", MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
 }
 
 
