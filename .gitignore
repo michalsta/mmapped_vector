@@ -30,3 +30,9 @@
 *.exe
 *.out
 *.app
+build/
+correctness
+performance
+performance_threaded
+*.dat
+CLAUDE.md

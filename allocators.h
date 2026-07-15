@@ -249,7 +249,7 @@ public:
     friend class MmappedVector<T, MmapFileAllocator, false>;
     friend class MmappedVector<T, MmapFileAllocator, true>;
 private:
-    void self_close() noexcept;
+    void self_close();
     std::string file_name;
     int file_descriptor;
     int mmap_flags;
@@ -330,7 +330,7 @@ MmapFileAllocator<T>& MmapFileAllocator<T>::operator=(MmapFileAllocator&& other)
 }
 
 template <typename T>
-void MmapFileAllocator<T>::self_close() noexcept {
+void MmapFileAllocator<T>::self_close() {
     if (this->ptr) {
         this->resize(this->get_backing_size()); // Truncate the file to the actual size
         munmap(this->ptr, this->get_backing_size() * sizeof(T));

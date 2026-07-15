@@ -12,8 +12,7 @@ performance: performance.cpp performance_threaded.cpp *.h
 	#$(CXX) -std=c++20 -Wall -Wextra -fmax-errors=1 -Og -g -fsanitize=address performance.cpp -o performance
 	#$(OPT)  performance.cpp -o performance
 	$(OPT) performance_threaded.cpp -o performance
-correctness: correctness.cpp headers
-	#$(DBG) correctness.cpp -o correctness
+correctness: correctness.cpp *.h
 	$(ASAN) correctness.cpp -o correctness
 test: performance
 	./performance

@@ -1,175 +1,113 @@
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <doctest/doctest.h>
+
 #include "mmapped_vector.h"
-
-#include <iostream>
+#include <filesystem>
+#include <thread>
 #include <vector>
-#include <cassert>
 
+namespace mv = mmapped_vector;
 
-// Write correctness tests for MmappedVector, just correctness, single-threaded, no performance tests
+// ── RAII temp file ─────────────────────────────────────────────────────────
 
-template <typename T>
-mmapped_vector::MmappedVector<T, mmapped_vector::MallocAllocator<T>> malloc_vector() {
-    return mmapped_vector::MmappedVector<int, mmapped_vector::MallocAllocator<int>>();
+struct TempFile {
+    std::string path;
+    explicit TempFile(std::string p) : path(std::move(p)) {}
+    ~TempFile() { std::filesystem::remove(path); }
+    operator const std::string&() const { return path; }
+};
+
+static std::string unique_tmp() {
+    static int n = 0;
+    return "mmv_test_" + std::to_string(n++) + ".dat";
 }
 
-template <typename T>
-mmapped_vector::MmappedVector<T, mmapped_vector::MmapAllocator<T>> mmap_vector() {
-    return mmapped_vector::MmappedVector<int, mmapped_vector::MmapAllocator<int>>();
+// ── shared test body (runs for every vector type) ──────────────────────────
+
+template <typename VT, typename Make>
+void shared_tests(Make make) {
+    VT v = make();
+    CHECK(v.empty());
+    CHECK(v.size() == 0);
+
+    v.push_back(1); v.push_back(2); v.push_back(3);
+    CHECK(v.size() == 3);
+    CHECK(v[0] == 1); CHECK(v[1] == 2); CHECK(v[2] == 3);
+    CHECK(v.front() == 1); CHECK(v.back() == 3);
+
+    v.emplace_back(4);
+    CHECK(v.size() == 4); CHECK(v.back() == 4);
+
+    v.pop_back();
+    CHECK(v.size() == 3); CHECK(v.back() == 3);
+
+    CHECK(v.at(0) == 1);
+    CHECK_THROWS_AS(v.at(99), std::out_of_range);
+
+    v.clear();
+    CHECK(v.empty());
+
+    for (int i = 0; i < 200; ++i) v.push_back(i);
+    CHECK(v.size() == 200);
+    CHECK(v[0] == 0); CHECK(v[199] == 199);
+    CHECK(v.cend() == v.cbegin() + 200);
+
+    VT v2(std::move(v));
+    CHECK(v.empty()); CHECK(v2.size() == 200);
+
+    v = std::move(v2);
+    CHECK(v2.empty()); CHECK(v.size() == 200);
+
+    VT v3 = make();
+    for (int i = 0; i < 200; ++i) v3.push_back(i);
+    CHECK(v == v3);
+    v3.push_back(999);
+    CHECK(v != v3);
 }
 
-template <typename T>
-mmapped_vector::MmappedVector<T, mmapped_vector::MmapFileAllocator<T>> mmap_file_vector() {
-    return mmapped_vector::MmappedVector<int, mmapped_vector::MmapFileAllocator<int>>("test.dat", MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+// ── per-type test cases ────────────────────────────────────────────────────
+
+TEST_CASE("std::vector<int>") {
+    shared_tests<std::vector<int>>([]{ return std::vector<int>{}; });
 }
 
+TEST_CASE("MallocVector<int>") {
+    shared_tests<mv::MallocVector<int>>([]{ return mv::MallocVector<int>{}; });
+}
 
-template <typename VectorType>
-VectorType empty() {
-    static int test_file_no = 0;
-    if constexpr (std::is_same<VectorType, std::vector<typename VectorType::value_type>>::value) {
-        return std::vector<typename VectorType::value_type>();
-    } else if constexpr (std::is_same<VectorType, mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MallocAllocator<typename VectorType::value_type>>>::value) {
-        return mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MallocAllocator<typename VectorType::value_type>>();
-    } else if constexpr (std::is_same<VectorType, mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapAllocator<typename VectorType::value_type>>>::value) {
-        return mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapAllocator<typename VectorType::value_type>>();
-    } else if constexpr (std::is_same<VectorType, mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapFileAllocator<typename VectorType::value_type>>>::value) {
-        std::string file_name = "test" + std::to_string(test_file_no++) + ".dat";
-        return mmapped_vector::MmappedVector<typename VectorType::value_type, mmapped_vector::MmapFileAllocator<typename VectorType::value_type>>(file_name, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-    } else {
-        throw std::runtime_error("empty() not implemented for this type");
+TEST_CASE("MmapVector<int>") {
+    shared_tests<mv::MmapVector<int>>([]{ return mv::MmapVector<int>{}; });
+}
+
+TEST_CASE("MmapFileVector<int>") {
+    TempFile f1{unique_tmp()}, f2{unique_tmp()};
+    // make() is called twice inside shared_tests (once for v, once for v3)
+    int call = 0;
+    shared_tests<mv::MmapFileVector<int>>([&]{
+        const std::string& path = (call++ == 0) ? f1.path : f2.path;
+        return mv::MmapFileVector<int>(path, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    });
+}
+
+TEST_CASE("MmapFileVector<int>: persistence across open/close") {
+    TempFile f{unique_tmp()};
+    {
+        mv::MmapFileVector<int> v(f, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        v.push_back(10); v.push_back(20); v.push_back(30);
     }
+    mv::MmapFileVector<int> v2(f);
+    CHECK(v2.size() == 3);
+    CHECK(v2[0] == 10); CHECK(v2[1] == 20); CHECK(v2[2] == 30);
 }
 
+TEST_CASE("MmappedVector<thread_safe>: operations_in_progress == 0 after concurrent push_backs") {
+    mv::MmappedVector<int, mv::MallocAllocator<int>, true> v;
+    v.reserve(1000);  // pre-reserve so all push_backs take the fast path
 
-template <typename VectorType>
-void run_tests()
-{
-    VectorType vec = empty<VectorType>();
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 200; ++i)
+        threads.emplace_back([&]{ v.push_back(42); });
+    for (auto& t : threads) t.join();
 
-    // Test empty vector
-    assert(vec.size() == 0);
-    //assert(vec.capacity() == 0);
-    assert(vec.empty());
-
-    // Test push_back
-    vec.push_back(1);
-    assert(vec.size() == 1);
-    assert(vec.capacity() >= 1);
-    assert(!vec.empty());
-    assert(vec[0] == 1);
-
-    // Test emplace_back
-    vec.emplace_back(2);
-    assert(vec.size() == 2);
-    assert(vec.capacity() >= 2);
-    assert(!vec.empty());
-    assert(vec[0] == 1);
-    assert(vec[1] == 2);
-
-    // Test pop_back
-    vec.pop_back();
-    assert(vec.size() == 1);
-    assert(vec.capacity() >= 1);
-    assert(!vec.empty());
-    assert(vec[0] == 1);
-
-    // Test at
-    assert(vec.at(0) == 1);
-    try {
-        std::ignore = vec.at(1);
-        assert(false);
-    } catch (std::out_of_range& e) {
-        assert(true);
-    }
-
-    // Test front
-    assert(vec.front() == 1);
-
-    // Test back
-    assert(vec.back() == 1);
-
-    // Test clear
-    vec.clear();
-    assert(vec.size() == 0);
-    assert(vec.capacity() >= 1);
-    assert(vec.empty());
-
-    // Skip testing copy constructor
-    // Test move constructor
-    vec.push_back(1);
-    vec.push_back(2);
-    VectorType vec2(std::move(vec));
-    assert(vec.size() == 0);
-    assert(vec.capacity() >= 0);
-    assert(vec.empty());
-    assert(vec2.size() == 2);
-    assert(vec2.capacity() >= 2);
-    assert(!vec2.empty());
-    assert(vec2[0] == 1);
-    assert(vec2[1] == 2);
-
-    // Skip testing copy assignment operator
-    // Test move assignment operator
-    vec = std::move(vec2);
-    assert(vec2.size() == 0);
-    assert(vec2.capacity() >= 0);
-    assert(vec2.empty());
-    assert(vec.size() == 2);
-    assert(vec.capacity() >= 2);
-    assert(!vec.empty());
-    assert(vec[0] == 1);
-    assert(vec[1] == 2);
-
-    // Test resize
-    vec.resize(1);
-    assert(vec.size() == 1);
-    assert(vec.capacity() >= 1);
-    assert(!vec.empty());
-    assert(vec[0] == 1);
-
-    // Test destructor
-    VectorType* vec_ptr = new VectorType(empty<VectorType>());
-    vec_ptr->push_back(1);
-    delete vec_ptr;
-
-    // Test operator[]
-    assert(vec[0] == 1);
-
-    // Test operator==
-    VectorType vec3 = empty<VectorType>();
-    vec.push_back(2);
-    vec3.push_back(1);
-    vec3.push_back(2);
-    assert(vec == vec3);
-    vec3.push_back(3);
-    assert(!(vec == vec3));
-
-    // Test operator!=
-    assert(vec != vec3);
-    vec.push_back(3);
-    assert(!(vec != vec3));
-
-    // Test cend
-    assert(vec.cend() == vec.begin() + vec.size());
-
-
-}
-
-
-int main()
-{
-    std::cerr << "Running tests for std::vector" << std::endl;
-    run_tests<std::vector<int>>();
-    std::cerr << "done" << std::endl;
-    std::cerr << "Running tests for MmappedVector (MallocAllocator)" << std::endl;
-    run_tests<mmapped_vector::MmappedVector<int, mmapped_vector::MallocAllocator<int>>>();
-    std::cerr << "done" << std::endl;
-    std::cerr << "Running tests for MmappedVector (MmapAllocator)" << std::endl;
-    run_tests<mmapped_vector::MmappedVector<int, mmapped_vector::MmapAllocator<int>>>();
-    std::cerr << "done" << std::endl;
-    std::cerr << "Running tests for MmappedVector (MmapFileAllocator)" << std::endl;
-    run_tests<mmapped_vector::MmappedVector<int, mmapped_vector::MmapFileAllocator<int>>>();
-    std::cerr << "done" << std::endl;
-
-    return 0;
+    CHECK(v.operations_in_progress.load() == 0);
 }

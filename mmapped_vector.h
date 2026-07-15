@@ -46,7 +46,11 @@ class MmappedVector {
     static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable for safe memory movement");
     static_assert(std::is_base_of<Allocator<T>, AllocatorType>::value, "AllocatorType must be derived from Allocator");
 
+#ifndef MMAPPED_VECTOR_TESTING
 private:
+#else
+public:
+#endif
     AllocatorType allocator;
     std::conditional_t<thread_safe, std::atomic<size_t>, size_t> element_count;
     std::conditional_t<thread_safe, std::atomic<size_t>, std::monostate> capacity_atomic;
@@ -149,7 +153,6 @@ public:
     void store_at_index(const T& value, size_t index);
 
     friend class IndexHolder<T, AllocatorType>;
-private:
 };
 
 // Method implementations
@@ -421,7 +424,7 @@ class IndexHolder {
 public:
     inline IndexHolder(MmappedVector<T, AllocatorType, true>& vec, size_t index) : vec(vec) {
 
-        //vec.operations_in_progress.fetch_add(1, MEMORY_ORDER);
+        vec.operations_in_progress.fetch_add(1, MEMORY_ORDER);
         size_t current_capacity = vec.capacity_atomic.load(MEMORY_ORDER_ACQ);
         if (index >= current_capacity)
             slow_path(index);
@@ -437,7 +440,6 @@ public:
             vec.allocator.increase_capacity(std::max(vec.needed_capacity.load(MEMORY_ORDER), index + 1));
             vec.capacity_atomic.store(vec.allocator.get_capacity(), MEMORY_ORDER_REL);
         }
-        vec.operations_in_progress.fetch_add(1, MEMORY_ORDER);
     }
 
     inline ~IndexHolder() {
