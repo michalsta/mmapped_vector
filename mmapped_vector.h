@@ -1,3 +1,6 @@
+#ifndef MMAPPED_VECTOR_H
+#define MMAPPED_VECTOR_H
+
 #include <sys/mman.h>
 #include <string>
 #include <stdexcept>
@@ -449,3 +452,5 @@ public:
 };
 
 } // namespace mmapped_vector
+
+#endif // MMAPPED_VECTOR_H
