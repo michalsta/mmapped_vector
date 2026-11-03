@@ -7,7 +7,9 @@
 
 class RAIIFileDescriptor {
 public:
-    RAIIFileDescriptor(int fd) : fd(fd) {}
+    explicit RAIIFileDescriptor(int fd) : fd(fd) {}
+    RAIIFileDescriptor(const RAIIFileDescriptor&) = delete;
+    RAIIFileDescriptor& operator=(const RAIIFileDescriptor&) = delete;
     ~RAIIFileDescriptor() {
         if (fd != -1) {
             close(fd);
