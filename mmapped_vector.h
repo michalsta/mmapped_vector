@@ -11,6 +11,8 @@
 #include <mutex>
 #include <atomic>
 #include <algorithm>
+#include <concepts>
+#include <type_traits>
 
 
 #include "allocators.h"
@@ -73,9 +75,11 @@ public:
     using const_pointer = const T*;
 
 
-    // Default constructor: Creates an empty vector with initial capacity
+    // Constructs the allocator from args (e.g. a file name for MmapFileAllocator).
+    // Explicit unless default-constructing; constrained so it never hijacks copy/move.
     template <typename... Args>
-    MmappedVector(Args&&... args);
+        requires std::constructible_from<AllocatorType, Args...>
+    explicit(sizeof...(Args) != 0) MmappedVector(Args&&... args);
 
     // Destructor: Cleans up resources
     ~MmappedVector();
@@ -84,11 +88,9 @@ public:
     MmappedVector(const MmappedVector& other) = delete;
     MmappedVector& operator=(const MmappedVector& other) = delete;
 
-    // Move constructor
-    MmappedVector(MmappedVector&& other) noexcept;
-
-    // Move assignment operator
-    MmappedVector& operator=(MmappedVector&& other) noexcept;
+    // Move constructor / assignment (not available in thread-safe mode)
+    MmappedVector(MmappedVector&& other) noexcept requires (!thread_safe);
+    MmappedVector& operator=(MmappedVector&& other) noexcept requires (!thread_safe);
 
     // Adds an element to the end of the vector
     void push_back(const T& value);
@@ -153,8 +155,15 @@ public:
     bool operator==(const MmappedVector& other) const;
     bool operator!=(const MmappedVector& other) const;
 
-    void store_at_index(const T& value, size_t index);
+    void store_at_index(const T& value, size_t index) requires thread_safe;
 
+private:
+    // Runs a capacity-changing operation; in thread-safe mode serialises it with growing
+    // push_backs and republishes capacity_atomic so the push_back fast path sees it.
+    template <typename F>
+    void change_capacity(F&& f);
+
+public:
     friend class IndexHolder<T, AllocatorType>;
 };
 
@@ -162,6 +171,7 @@ public:
 
 template <typename T, typename AllocatorType, bool thread_safe>
 template <typename... Args>
+    requires std::constructible_from<AllocatorType, Args...>
 MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(Args&&... args)
     : allocator(std::forward<Args>(args)...), element_count(allocator.get_backing_size()) {
         if constexpr(thread_safe) {
@@ -173,20 +183,15 @@ MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(Args&&... args)
 
 
 template <typename T, typename AllocatorType, bool thread_safe>
-MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(MmappedVector&& other) noexcept
+MmappedVector<T, AllocatorType, thread_safe>::MmappedVector(MmappedVector&& other) noexcept requires (!thread_safe)
     : allocator(std::move(other.allocator)), element_count(other.element_count) {
-    if constexpr(thread_safe) {
-        throw std::runtime_error("Not implemented");
-    }
     other.element_count = 0;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe>
-MmappedVector<T, AllocatorType, thread_safe>& MmappedVector<T, AllocatorType, thread_safe>::operator=(MmappedVector&& other) noexcept {
-    if constexpr(thread_safe) {
-        throw std::runtime_error("Not implemented");
-    }
+MmappedVector<T, AllocatorType, thread_safe>& MmappedVector<T, AllocatorType, thread_safe>::operator=(MmappedVector&& other) noexcept requires (!thread_safe) {
     if (this != &other) {
+        allocator.sync(element_count);  // let a file-backed target persist its real size before closing
         allocator = std::move(other.allocator);
         element_count = other.element_count;
 
@@ -211,10 +216,7 @@ T& MmappedVector<T, AllocatorType, thread_safe>::operator[](size_t index) {
 
 #if USE_INELEGANT_IMPLEMENTATION
 template <typename T, typename AllocatorType, bool thread_safe>
-void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value, size_t index) {
-    if constexpr(!thread_safe) {
-        throw std::runtime_error("This function should only be called in thread-safe mode");
-    }
+void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value, size_t index) requires thread_safe {
     operations_in_progress.fetch_add(1, MEMORY_ORDER);
     size_t current_capacity = capacity_atomic.load(MEMORY_ORDER);
     if (index < current_capacity) {
@@ -238,10 +240,7 @@ void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value
 #else
 
 template <typename T, typename AllocatorType, bool thread_safe>
-inline void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value, size_t index) {
-    if constexpr(!thread_safe) {
-        throw std::runtime_error("This function should only be called in thread-safe mode");
-    }
+inline void MmappedVector<T, AllocatorType, thread_safe>::store_at_index(const T& value, size_t index) requires thread_safe {
     IndexHolder<T, AllocatorType> holder(*this, index);
     allocator.ptr[index] = value;
 };
@@ -309,21 +308,33 @@ void MmappedVector<T, AllocatorType, thread_safe>::clear() {
     element_count = 0;
 };
 
+template <typename T, typename AllocatorType, bool thread_safe>
+template <typename F> inline
+void MmappedVector<T, AllocatorType, thread_safe>::change_capacity(F&& f) {
+    if constexpr(thread_safe) {
+        std::lock_guard<std::mutex> lock(mutex);
+        f();
+        capacity_atomic.store(allocator.get_capacity(), MEMORY_ORDER_REL);
+    } else {
+        f();
+    }
+};
+
 // TODO probably needs to be deleted
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::resize(size_t new_size) {
-    allocator.resize(new_size);
+    change_capacity([&] { allocator.resize(new_size); });
     element_count = new_size;
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::reserve(size_t new_capacity) {
-    allocator.increase_capacity(new_capacity);
+    change_capacity([&] { allocator.increase_capacity(new_capacity); });
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 void MmappedVector<T, AllocatorType, thread_safe>::shrink_to_fit() {
-    allocator.resize(element_count);
+    change_capacity([&] { allocator.resize(element_count); });
 };
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
@@ -400,7 +411,7 @@ template <typename T, typename AllocatorType, bool thread_safe>
 template<typename... Args> inline
 void MmappedVector<T, AllocatorType, thread_safe>::emplace_back(Args&&... args) {
     if constexpr(thread_safe) {
-        throw std::runtime_error("Not implemented");
+        push_back(T(std::forward<Args>(args)...));  // T is trivially copyable: same as in-place
     } else {
         if (element_count >= allocator.get_capacity())
             allocator.increase_capacity(element_count + 1);

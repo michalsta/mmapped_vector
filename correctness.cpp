@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <filesystem>
 #include <numeric>
+#include <string>
+#include <type_traits>
 #include <thread>
 #include <vector>
 #include <cstdint>
@@ -372,6 +374,116 @@ TEST_CASE("MmapFileVector: empty or cleared vector is destroyed cleanly") {
     CHECK(std::filesystem::file_size(f.path) == 0);
     mv::MmapFileVector<int> v(f);
     CHECK(v.size() == 0);
+}
+
+// ── compile-time API properties ───────────────────────────────────────────
+
+using TSVec = mv::MmappedVector<int, mv::MallocAllocator<int>, true>;
+// Not copyable, also not via the forwarding constructor from a non-const lvalue.
+static_assert(!std::is_copy_constructible_v<mv::MallocVector<int>>);
+static_assert(!std::is_constructible_v<mv::MallocVector<int>, mv::MallocVector<int>&>);
+static_assert(std::is_nothrow_move_constructible_v<mv::MallocVector<int>>);
+static_assert(std::is_nothrow_move_assignable_v<mv::MmapFileVector<int>>);
+// Thread-safe vectors cannot be moved (rather than throwing from a noexcept move).
+static_assert(!std::is_move_constructible_v<TSVec>);
+static_assert(!std::is_move_assignable_v<TSVec>);
+// No implicit conversion from allocator arguments; explicit construction still works.
+static_assert(!std::is_convertible_v<std::string, mv::MmapFileVector<int>>);
+static_assert(std::is_constructible_v<mv::MmapFileVector<int>, std::string>);
+static_assert(!std::is_convertible_v<int, mv::MmapVector<int>>);
+static_assert(std::is_constructible_v<mv::MmapVector<int>, int>);
+static_assert(std::is_default_constructible_v<mv::MallocVector<int>>);
+
+// ── MmapFileVector move assignment ────────────────────────────────────────
+
+TEST_CASE("MmapFileVector: move assignment persists the target's file first") {
+    TempFile fa{unique_tmp()}, fb{unique_tmp()};
+    {
+        mv::MmapFileVector<int> a(fa, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        for (int i = 0; i < 100; ++i) a.push_back(i);
+        mv::MmapFileVector<int> b(fb, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        b.push_back(7);
+        a = std::move(b);  // closes fa, a now owns fb
+        CHECK(a.size() == 1); CHECK(a[0] == 7);
+        a.push_back(8);
+    }
+    {
+        mv::MmapFileVector<int> a(fa);
+        REQUIRE(a.size() == 100);
+        bool ok = true;
+        for (int i = 0; i < 100; ++i) ok &= (a[i] == i);
+        CHECK(ok);
+    }
+    mv::MmapFileVector<int> b(fb);
+    REQUIRE(b.size() == 2);
+    CHECK(b[0] == 7); CHECK(b[1] == 8);
+}
+
+// ── thread-safe capacity changes ──────────────────────────────────────────
+
+template <typename V>
+static void concurrent_push(V& v, int n_threads, int per_thread, int base) {
+    std::vector<std::thread> threads;
+    for (int t = 0; t < n_threads; ++t)
+        threads.emplace_back([&, t] {
+            for (int j = 0; j < per_thread; ++j) v.push_back(base + t * per_thread + j);
+        });
+    for (auto& t : threads) t.join();
+}
+
+TEST_CASE("MmappedVector<thread_safe>: capacity changes are seen by the push_back fast path") {
+    SUBCASE("shrink_to_fit then push") {
+        TSVec v;
+        for (int i = 0; i < 1000; ++i) v.push_back(i);
+        v.clear();
+        v.push_back(-1);
+        v.shrink_to_fit();
+        CHECK(v.capacity() == 1);
+        CHECK(v.capacity_atomic.load() == v.capacity());
+        // Single-threaded on purpose: concurrent growth is still racy (resize vs. in-flight
+        // writes); this checks only that the fast path sees the smaller capacity.
+        for (int i = 0; i < 8000; ++i) v.push_back(i);  // must grow, not write past the end
+        CHECK(v.size() == 8001);
+        bool ok = v[0] == -1;
+        for (int i = 0; i < 8000; ++i) ok &= (v[i + 1] == i);
+        CHECK(ok);
+    }
+    SUBCASE("reserve") {
+        TSVec v;
+        v.reserve(100000);
+        CHECK(v.capacity_atomic.load() == v.capacity());
+        concurrent_push(v, 4, 1000, 0);
+        CHECK(v.capacity() == v.capacity_atomic.load());
+        CHECK(v.size() == 4000);
+    }
+    SUBCASE("resize(0) then push") {
+        TSVec v;
+        for (int i = 0; i < 400; ++i) v.push_back(i);
+        v.resize(0);
+        CHECK(v.capacity() == 0);
+        CHECK(v.capacity_atomic.load() == 0);
+        for (int i = 0; i < 4000; ++i) v.push_back(i);  // single-threaded, see above
+        CHECK(v.size() == 4000);
+        CHECK(v.capacity() == v.capacity_atomic.load());
+        bool ok = true;
+        for (int i = 0; i < 4000; ++i) ok &= (v[i] == i);
+        CHECK(ok);
+    }
+}
+
+TEST_CASE("MmappedVector<thread_safe>: emplace_back") {
+    TSVec v;
+    v.reserve(4000);  // no growth while threads write: concurrent growth is still racy
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t)
+        threads.emplace_back([&, t] { for (int j = 0; j < 1000; ++j) v.emplace_back(t * 1000 + j); });
+    for (auto& t : threads) t.join();
+    CHECK(v.size() == 4000);
+    std::vector<int> vals(v.begin(), v.end());
+    std::sort(vals.begin(), vals.end());
+    bool ok = true;
+    for (int i = 0; i < 4000; ++i) ok &= (vals[i] == i);
+    CHECK(ok);
 }
 
 // ── thread-safe push_back ─────────────────────────────────────────────────
