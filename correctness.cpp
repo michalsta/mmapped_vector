@@ -281,33 +281,35 @@ TEST_CASE("MmapVector: growth when the address range after it is taken") {
     if (blocker) munmap(blocker, (size_t)sysconf(_SC_PAGESIZE));
 }
 
-TEST_CASE("MmapVector(MAP_SHARED): stays shared with fork()ed child after moving growth") {
-#ifdef MREMAP_MAYMOVE
-    // BUG (Linux): a MAP_SHARED|MAP_ANONYMOUS mapping is backed by a fixed-size shmem object;
-    // mremap grows the mapping but not the object, so touching the new pages raises SIGBUS.
-    // Growing a shared anonymous MmapVector past its first page crashes. Needs e.g. a memfd
-    // backing that can be ftruncate()d. Skipped until fixed.
-    MESSAGE("skipped on Linux: MAP_SHARED anonymous MmapVector cannot grow (SIGBUS)");
-    return;
-#endif
+TEST_CASE("MmapVector(MAP_SHARED): fixed capacity, shared with fork()ed child, growth throws") {
+    using A = mv::MmapAllocator<int>;
+    constexpr size_t cap = A::shared_max_bytes / sizeof(int);
     mv::MmapVector<int> v(MAP_SHARED | MAP_ANONYMOUS);
-    for (int i = 0; i < 100000; ++i) v.push_back(i);
-    void* blocker = block_after(v);
-    for (int i = 100000; i < 1000000; ++i) v.push_back(i);
+    CHECK(v.capacity() == cap);  // same on every platform, whatever the page size
+    for (size_t i = 0; i < cap; ++i) v.push_back((int)i);
 
     pid_t pid = fork();
     REQUIRE(pid != -1);
     if (pid == 0) {
-        v[0] = -1; v[999999] = -2;
+        v[0] = -1; v[cap - 1] = -2;
         _exit(0);
     }
     int status = 0;
     waitpid(pid, &status, 0);
     CHECK(WIFEXITED(status));
     CHECK(v[0] == -1);
-    CHECK(v[999999] == -2);
-    CHECK(v[500000] == 500000);
-    if (blocker) munmap(blocker, (size_t)sysconf(_SC_PAGESIZE));
+    CHECK(v[cap - 1] == -2);
+
+    const int* before = v.data();
+    CHECK_THROWS_AS(v.push_back(0), std::length_error);
+    CHECK_THROWS_AS(v.reserve(cap + 1), std::length_error);
+    CHECK(v.size() == cap);  // unchanged by the failed growth
+    CHECK(v.capacity() == cap);
+    CHECK(v.data() == before);
+    CHECK(v[1] == 1);
+    CHECK_NOTHROW(v.shrink_to_fit());
+    v.resize(0);
+    CHECK_NOTHROW(v.reserve(cap));
 }
 
 // ── resize(0) / empty vectors ─────────────────────────────────────────────

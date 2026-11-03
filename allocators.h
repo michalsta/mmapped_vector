@@ -130,6 +130,11 @@ public:
 
     void resize(size_t new_size) override;
 
+    // A MAP_SHARED anonymous mapping cannot grow on Linux (mremap does not grow the shmem
+    // object behind it: SIGBUS), so on every platform it holds at most this many bytes and
+    // growing past them throws std::length_error, whatever the page size.
+    static constexpr size_t shared_max_bytes = 4096;
+
     friend class MmappedVector<T, MmapAllocator, false>;
     friend class MmappedVector<T, MmapAllocator, true>;
 private:
@@ -147,7 +152,7 @@ MmapAllocator<T>::MmapAllocator(int flags) : Allocator<T>(), mmap_flags(flags) {
     if (this->ptr == MAP_FAILED) {
         throw std::runtime_error("MmapAllocator::ctor: mmap failed: " + mmapped_vector::get_error_message("mmap"));
     }
-    this->capacity = page_size / sizeof(T);
+    this->capacity = ((flags & MAP_SHARED) ? shared_max_bytes : page_size) / sizeof(T);
 }
 
 template <typename T>
@@ -185,6 +190,9 @@ MmapAllocator<T>::~MmapAllocator() {
 template <typename T>
 void MmapAllocator<T>::resize(size_t new_capacity) {
     if (new_capacity == this->capacity) return;
+    if ((this->mmap_flags & MAP_SHARED) && new_capacity > shared_max_bytes / sizeof(T))
+        throw std::length_error("MmapAllocator::resize: a MAP_SHARED anonymous mapping cannot grow past "
+                                + std::to_string(shared_max_bytes) + " bytes");
 
     // Capacity 0 holds no mapping at all (ptr == nullptr); growing from there maps afresh.
     if (new_capacity == 0) {
@@ -242,11 +250,6 @@ void MmapAllocator<T>::resize(size_t new_capacity) {
             }
             kr = mach_vm_deallocate(task, old_addr, old_bytes);
             if (kr != KERN_SUCCESS) fail("mach_vm_deallocate", kr);
-        }
-        if (this->mmap_flags & MAP_SHARED) {
-            // Keep MAP_SHARED semantics: the whole region stays shared with fork()ed children.
-            kern_return_t kr = mach_vm_inherit(task, new_addr, new_bytes, VM_INHERIT_SHARE);
-            if (kr != KERN_SUCCESS) fail("mach_vm_inherit", kr);
         }
         this->ptr = reinterpret_cast<T*>(new_addr);
     }
