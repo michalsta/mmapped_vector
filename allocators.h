@@ -186,10 +186,27 @@ template <typename T>
 void MmapAllocator<T>::resize(size_t new_capacity) {
     if (new_capacity == this->capacity) return;
 
+    // Capacity 0 holds no mapping at all (ptr == nullptr); growing from there maps afresh.
+    if (new_capacity == 0) {
+        if (this->ptr && munmap(this->ptr, this->capacity * sizeof(T)) == -1)
+            throw std::runtime_error("MmapAllocator::resize: munmap failed: " + mmapped_vector::get_error_message("munmap"));
+        this->ptr = nullptr;
+        this->capacity = 0;
+        return;
+    }
+    if (this->ptr == nullptr) {
+        void* p = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, this->mmap_flags, -1, 0);
+        if (p == MAP_FAILED)
+            throw std::runtime_error("MmapAllocator::resize: mmap failed: " + mmapped_vector::get_error_message("mmap"));
+        this->ptr = static_cast<T*>(p);
+        this->capacity = new_capacity;
+        return;
+    }
+
 #ifdef MREMAP_MAYMOVE
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
     if (new_ptr == MAP_FAILED)
-        throw_if_error("mremap");
+        throw std::runtime_error("MmapAllocator::resize: mremap failed: " + mmapped_vector::get_error_message("mremap"));
     this->ptr = static_cast<T*>(new_ptr);
 
 #elif MMAPPED_VECTOR_USE_MACH_VM
@@ -204,10 +221,7 @@ void MmapAllocator<T>::resize(size_t new_capacity) {
         throw std::runtime_error(std::string("MmapAllocator::resize: ") + what + " failed: " + mach_error_string(kr));
     };
 
-    if (new_bytes == 0) {
-        // Same behaviour as mremap to 0 bytes on Linux (EINVAL); see the resize(0) test.
-        throw std::runtime_error("MmapAllocator::resize: cannot resize to 0 bytes");
-    } else if (new_bytes < old_bytes) {
+    if (new_bytes < old_bytes) {
         kern_return_t kr = mach_vm_deallocate(task, old_addr + new_bytes, old_bytes - new_bytes);
         if (kr != KERN_SUCCESS) fail("mach_vm_deallocate", kr);
     } else if (new_bytes > old_bytes) {
@@ -359,17 +373,15 @@ MmapFileAllocator<T>& MmapFileAllocator<T>::operator=(MmapFileAllocator&& other)
 
 template <typename T>
 void MmapFileAllocator<T>::self_close() {
-    if (this->ptr) {
-        this->resize(this->get_backing_size()); // Truncate the file to the actual size
-        munmap(this->ptr, this->get_backing_size() * sizeof(T));
-        this->ptr = nullptr;
-        this->backing_size = 0;
-        this->capacity = 0;
-        if (this->file_descriptor != -1) {
-            close(this->file_descriptor);
-            this->file_descriptor = -1;
-        }
-    }
+    if (this->file_descriptor == -1) return;  // moved-from
+    this->resize(this->get_backing_size());   // truncate the file to the actual size (may be 0)
+    if (this->ptr)
+        munmap(this->ptr, this->capacity * sizeof(T));
+    close(this->file_descriptor);
+    this->file_descriptor = -1;
+    this->ptr = nullptr;
+    this->backing_size = 0;
+    this->capacity = 0;
 }
 
 
@@ -385,6 +397,23 @@ void MmapFileAllocator<T>::resize(size_t new_capacity) {
     if (ftruncate(this->file_descriptor, new_capacity * sizeof(T)) == -1)
         throw std::runtime_error("MmapFileAllocator::resize: ftruncate failed: " + mmapped_vector::get_error_message("ftruncate"));
 
+    // Capacity 0 holds no mapping at all (ptr == nullptr); growing from there maps afresh.
+    if (new_capacity == 0) {
+        if (this->ptr && munmap(this->ptr, this->capacity * sizeof(T)) == -1)
+            throw std::runtime_error("MmapFileAllocator::resize: munmap failed: " + mmapped_vector::get_error_message("munmap"));
+        this->ptr = nullptr;
+        this->capacity = 0;
+        return;
+    }
+    if (this->ptr == nullptr) {
+        void* p = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, this->mmap_flags, this->file_descriptor, 0);
+        if (p == MAP_FAILED)
+            throw std::runtime_error("MmapFileAllocator::resize: mmap failed: " + mmapped_vector::get_error_message("mmap"));
+        this->ptr = static_cast<T*>(p);
+        this->capacity = new_capacity;
+        return;
+    }
+
 #ifdef MREMAP_MAYMOVE
     void* new_ptr = mremap(this->ptr, this->capacity * sizeof(T), new_capacity * sizeof(T), MREMAP_MAYMOVE);
     if (new_ptr == MAP_FAILED) {
@@ -394,6 +423,7 @@ void MmapFileAllocator<T>::resize(size_t new_capacity) {
     if(munmap(this->ptr, this->capacity * sizeof(T)) == -1)
         throw std::runtime_error("MmapFileAllocator::resize: munmap failed: " + mmapped_vector::get_error_message("munmap"));
     this->ptr = nullptr;  // prevent double-munmap if the re-map below fails
+    this->capacity = 0;
     void* new_ptr = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, this->mmap_flags, this->file_descriptor, 0);
     if (new_ptr == MAP_FAILED) {
         throw std::runtime_error("MmapFileAllocator::resize: mmap failed: " + mmapped_vector::get_error_message("mmap"));
@@ -477,7 +507,15 @@ template <typename T>
 void MallocAllocator<T>::resize(size_t new_capacity) {
     if (new_capacity == this->capacity) return;
 
-    void* new_ptr = realloc(this->ptr, new_capacity * sizeof(T));
+    // realloc(p, 0) may free p and return NULL; release explicitly instead.
+    if (new_capacity == 0) {
+        free(this->ptr);
+        this->ptr = nullptr;
+        this->capacity = 0;
+        return;
+    }
+
+    void* new_ptr = realloc(this->ptr, new_capacity * sizeof(T));  // realloc(NULL, n) == malloc(n)
     if (!new_ptr) {
         throw std::runtime_error("MallocAllocator: realloc failed");
     }

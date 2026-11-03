@@ -308,37 +308,70 @@ TEST_CASE("MmapVector(MAP_SHARED): stays shared with fork()ed child after moving
     if (blocker) munmap(blocker, (size_t)sysconf(_SC_PAGESIZE));
 }
 
-// ── known bugs ────────────────────────────────────────────────────────────
+// ── resize(0) / empty vectors ─────────────────────────────────────────────
+// Capacity 0 releases the memory (data() == nullptr); the vector stays usable.
 
-TEST_CASE("BUG: resize(0) / shrink_to_fit on empty vector") {
-    // MmappedVector does not handle size == 0 gracefully:
-    //
-    //   MmapAllocator::resize(0):   mremap to 0 bytes → EINVAL on Linux → throws
-    //                               (ptr unchanged; destructor still cleans up correctly)
-    //
-    //   MallocAllocator::resize(0): realloc(ptr, 0) FREES the pointer then returns NULL
-    //                               → code throws, but ptr is now dangling
-    //                               → destructor calls free(ptr) again → DOUBLE FREE
-    //                               (NOT tested here; crashes under ASan even if caught)
-    //
-    //   MmapFileAllocator:          ftruncate+mremap fails → throws; PLUS if reached
-    //                               from destructor after clear(): std::terminate.
-    //                               Cannot be tested safely.
-    //
-    // Expected behaviour (matching std::vector): should be a no-op.
-    // Fix: add "if (new_capacity == 0) return;" in each allocator's resize().
-    // When fixed: CHECK_THROWS → CHECK_NOTHROW.
+template <typename VT>
+static void check_resize_zero(VT& v) {
+    for (int i = 0; i < 100; ++i) v.push_back(i);
+    CHECK_NOTHROW(v.resize(0));
+    CHECK(v.size() == 0);
+    CHECK(v.capacity() == 0);
+    CHECK(v.begin() == v.end());
+    for (int i = 0; i < 1000; ++i) v.push_back(i);  // grows again from nothing
+    CHECK(v.size() == 1000);
+    bool ok = true;
+    for (int i = 0; i < 1000; ++i) ok &= (v[i] == i);
+    CHECK(ok);
 
-    SUBCASE("MmapVector: resize(0) throws") {
-        mv::MmapVector<int> v;
-        CHECK_THROWS(v.resize(0));
+    v.clear();
+    CHECK_NOTHROW(v.shrink_to_fit());
+    CHECK(v.capacity() == 0);
+    CHECK_NOTHROW(v.shrink_to_fit());  // already empty: no-op
+    v.push_back(7);
+    CHECK(v.size() == 1); CHECK(v[0] == 7);
+    v.resize(0);  // destroyed with capacity 0
+}
+
+TEST_CASE("resize(0) and shrink_to_fit on empty vectors") {
+    SUBCASE("MallocVector") { mv::MallocVector<int> v; check_resize_zero(v); }
+    SUBCASE("MmapVector")   { mv::MmapVector<int> v;   check_resize_zero(v); }
+    SUBCASE("MmapVector(MAP_SHARED)") {
+        mv::MmapVector<int> v(MAP_SHARED | MAP_ANONYMOUS);
+        CHECK_NOTHROW(v.resize(0));
+        v.push_back(1);  // fresh mapping, within one page: fine on Linux too
+        CHECK(v[0] == 1);
     }
-    SUBCASE("MmapVector: shrink_to_fit on empty throws") {
-        mv::MmapVector<int> v;
-        CHECK_THROWS(v.shrink_to_fit());
+    SUBCASE("MmapFileVector") {
+        TempFile f{unique_tmp()};
+        {
+            mv::MmapFileVector<int> v(f, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+            check_resize_zero(v);
+        }
+        CHECK(std::filesystem::file_size(f.path) == 0);
     }
-    // MallocVector resize(0)/shrink_to_fit: not tested — causes double-free under ASan.
-    // MmapFileVector + clear() + destroy: not tested — std::terminate.
+}
+
+TEST_CASE("MmapFileVector: empty or cleared vector is destroyed cleanly") {
+    TempFile f{unique_tmp()};
+    {   // never written
+        mv::MmapFileVector<int> v(f, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    }
+    CHECK(std::filesystem::file_size(f.path) == 0);
+    {
+        mv::MmapFileVector<int> v(f);
+        CHECK(v.size() == 0);
+        for (int i = 0; i < 50; ++i) v.push_back(i);
+    }
+    CHECK(std::filesystem::file_size(f.path) == 50 * sizeof(int));
+    {   // cleared before destruction
+        mv::MmapFileVector<int> v(f);
+        CHECK(v.size() == 50);
+        v.clear();
+    }
+    CHECK(std::filesystem::file_size(f.path) == 0);
+    mv::MmapFileVector<int> v(f);
+    CHECK(v.size() == 0);
 }
 
 // ── thread-safe push_back ─────────────────────────────────────────────────
