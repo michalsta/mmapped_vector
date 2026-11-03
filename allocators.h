@@ -19,11 +19,11 @@
 #include <unistd.h>
 #include <cstring>
 #include <atomic>
-#if false //defined(__APPLE__) && defined(__MACH__)
-#include <mach/vm_map.h>
+#include <stdexcept>
+#if defined(__APPLE__) && defined(__MACH__) && !defined(MREMAP_MAYMOVE)
+#define MMAPPED_VECTOR_USE_MACH_VM 1
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
-
 #endif
 
 #define MMV_DEBUG 0
@@ -131,6 +131,8 @@ public:
 
     friend class MmappedVector<T, MmapAllocator, false>;
     friend class MmappedVector<T, MmapAllocator, true>;
+private:
+    int mmap_flags;
 };
 
 
@@ -139,26 +141,16 @@ MmapAllocator<T>::MmapAllocator() : MmapAllocator<T>(MAP_ANONYMOUS | MAP_PRIVATE
 
 
 template <typename T>
-MmapAllocator<T>::MmapAllocator(int flags) : Allocator<T>() {
-#if  false //defined(__APPLE__) && defined(__MACH__)
-    // Use Mach API mach_vm_map to allocate memory
-    mach_vm_address_t address = 0;
-    kern_return_t kr = mach_vm_map(mach_task_self(), &address, page_size, 0, VM_FLAGS_ANYWHERE, MEMORY_OBJECT_NULL, 0, FALSE, VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_NONE);
-    if (kr != KERN_SUCCESS) {
-        throw std::runtime_error("MmapAllocator::ctor: mach_vm_map failed: " + mmapped_vector::get_error_message("mach_vm_map"));
-    }
-    this->ptr = reinterpret_cast<T*>(address);
-#else
+MmapAllocator<T>::MmapAllocator(int flags) : Allocator<T>(), mmap_flags(flags) {
     this->ptr = static_cast<T*>(mmap(nullptr, page_size, PROT_READ | PROT_WRITE, flags, -1, 0));
     if (this->ptr == MAP_FAILED) {
         throw std::runtime_error("MmapAllocator::ctor: mmap failed: " + mmapped_vector::get_error_message("mmap"));
     }
-#endif
     this->capacity = page_size / sizeof(T);
 }
 
 template <typename T>
-MmapAllocator<T>::MmapAllocator(MmapAllocator&& other) noexcept : Allocator<T>() {
+MmapAllocator<T>::MmapAllocator(MmapAllocator&& other) noexcept : Allocator<T>(), mmap_flags(other.mmap_flags) {
     this->ptr = other.ptr;
     this->capacity = other.capacity;
     other.ptr = nullptr;
@@ -173,6 +165,7 @@ MmapAllocator<T>& MmapAllocator<T>::operator=(MmapAllocator&& other) noexcept {
         }
         this->ptr = other.ptr;
         this->capacity = other.capacity;
+        this->mmap_flags = other.mmap_flags;
         other.ptr = nullptr;
         other.capacity = 0;
     }
@@ -198,19 +191,53 @@ void MmapAllocator<T>::resize(size_t new_capacity) {
         throw_if_error("mremap");
     this->ptr = static_cast<T*>(new_ptr);
 
-#elif false // defined(__APPLE__) && defined(__MACH__)
-    // Use Mach API mach_vm_remap to resize the memory region
-    mach_vm_address_t new_address = 0;
-    mach_vm_size_t new_size = new_capacity * sizeof(T);
-    kern_return_t kr = mach_vm_remap(mach_task_self(), &new_address, new_size, 0, VM_FLAGS_ANYWHERE, mach_task_self(), reinterpret_cast<mach_vm_address_t>(this->ptr), FALSE, nullptr, nullptr, VM_INHERIT_NONE);
-    if (kr != KERN_SUCCESS) {
-        throw std::runtime_error("MmapAllocator::resize: mach_vm_remap failed: " + mmapped_vector::get_error_message("mach_vm_remap"));
+#elif MMAPPED_VECTOR_USE_MACH_VM
+    // macOS has no mremap. Grow without copying: first try to extend the region in place,
+    // otherwise move its pages into a new region with mach_vm_remap (no data is copied).
+    const mach_vm_size_t pg = vm_page_size;
+    const mach_vm_size_t old_bytes = (this->capacity * sizeof(T) + pg - 1) & ~(pg - 1);
+    const mach_vm_size_t new_bytes = (new_capacity * sizeof(T) + pg - 1) & ~(pg - 1);
+    const mach_port_t task = mach_task_self();
+    const mach_vm_address_t old_addr = reinterpret_cast<mach_vm_address_t>(this->ptr);
+    auto fail = [](const char* what, kern_return_t kr) {
+        throw std::runtime_error(std::string("MmapAllocator::resize: ") + what + " failed: " + mach_error_string(kr));
+    };
+
+    if (new_bytes == 0) {
+        // Same behaviour as mremap to 0 bytes on Linux (EINVAL); see the resize(0) test.
+        throw std::runtime_error("MmapAllocator::resize: cannot resize to 0 bytes");
+    } else if (new_bytes < old_bytes) {
+        kern_return_t kr = mach_vm_deallocate(task, old_addr + new_bytes, old_bytes - new_bytes);
+        if (kr != KERN_SUCCESS) fail("mach_vm_deallocate", kr);
+    } else if (new_bytes > old_bytes) {
+        mach_vm_address_t tail = old_addr + old_bytes;
+        mach_vm_address_t new_addr = old_addr;
+        if (mach_vm_allocate(task, &tail, new_bytes - old_bytes, VM_FLAGS_FIXED) != KERN_SUCCESS) {
+            // Address range after the region is taken: move the region.
+            new_addr = 0;
+            kern_return_t kr = mach_vm_allocate(task, &new_addr, new_bytes, VM_FLAGS_ANYWHERE);
+            if (kr != KERN_SUCCESS) fail("mach_vm_allocate", kr);
+            mach_vm_address_t dst = new_addr;
+            vm_prot_t cur_prot, max_prot;
+            kr = mach_vm_remap(task, &dst, old_bytes, 0, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE,
+                               task, old_addr, FALSE, &cur_prot, &max_prot, VM_INHERIT_DEFAULT);
+            if (kr != KERN_SUCCESS) {
+                mach_vm_deallocate(task, new_addr, new_bytes);
+                fail("mach_vm_remap", kr);
+            }
+            kr = mach_vm_deallocate(task, old_addr, old_bytes);
+            if (kr != KERN_SUCCESS) fail("mach_vm_deallocate", kr);
+        }
+        if (this->mmap_flags & MAP_SHARED) {
+            // Keep MAP_SHARED semantics: the whole region stays shared with fork()ed children.
+            kern_return_t kr = mach_vm_inherit(task, new_addr, new_bytes, VM_INHERIT_SHARE);
+            if (kr != KERN_SUCCESS) fail("mach_vm_inherit", kr);
+        }
+        this->ptr = reinterpret_cast<T*>(new_addr);
     }
-    this->ptr = reinterpret_cast<T*>(new_address);
 
 #else
-    // FIXME: Perhaps Mach API has something that'd allow us to avoid copying the data
-    void* new_ptr = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    void* new_ptr = mmap(nullptr, new_capacity * sizeof(T), PROT_READ | PROT_WRITE, this->mmap_flags, -1, 0);
     if (new_ptr == MAP_FAILED) {
         throw std::runtime_error("MmapAllocator::resize: mmap failed: " + mmapped_vector::get_error_message("mmap"));
     }

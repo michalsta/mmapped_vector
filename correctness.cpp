@@ -7,6 +7,10 @@
 #include <numeric>
 #include <thread>
 #include <vector>
+#include <cstdint>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace mv = mmapped_vector;
 
@@ -228,6 +232,80 @@ TEST_CASE("MmapFileVector: reopen with smaller backing size is not corrupted") {
     mv::MmapFileVector<int> v(f);
     CHECK(v.size() == 10);
     for (int i = 0; i < 10; ++i) CHECK(v[i] == i);
+}
+
+// ── MmapVector growth (mremap on Linux, mach_vm on macOS, mmap+copy elsewhere) ──
+
+// Map one page right after the vector's region so that it cannot grow in place.
+// Returns the page (to munmap later) or nullptr if the kernel put it elsewhere.
+template <typename VT>
+static void* block_after(VT& v) {
+    const size_t pg = (size_t)sysconf(_SC_PAGESIZE);
+    uintptr_t end = ((uintptr_t)v.data() + v.capacity() * sizeof(*v.data()) + pg - 1) & ~(uintptr_t)(pg - 1);
+    void* p = mmap((void*)end, pg, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p == MAP_FAILED) return nullptr;
+    if (p != (void*)end) { munmap(p, pg); return nullptr; }
+    return p;
+}
+
+TEST_CASE("MmapVector: growth across many pages keeps contents") {
+    mv::MmapVector<int> v;
+    constexpr int N = 1 << 22;  // 16 MiB
+    for (int i = 0; i < N; ++i) v.push_back(i);
+    bool ok = true;
+    for (int i = 0; i < N; ++i) ok &= (v[i] == i);
+    CHECK(ok);
+
+    v.resize(1000);
+    v.shrink_to_fit();
+    CHECK(v.capacity() == 1000);
+    for (int i = 1000; i < N; ++i) v.push_back(i);
+    ok = true;
+    for (int i = 0; i < N; ++i) ok &= (v[i] == i);
+    CHECK(ok);
+}
+
+TEST_CASE("MmapVector: growth when the address range after it is taken") {
+    mv::MmapVector<int> v;
+    for (int i = 0; i < 100000; ++i) v.push_back(i);
+    void* blocker = block_after(v);
+    if (!blocker) WARN_MESSAGE(false, "could not place blocker page; in-place growth not excluded");
+    const int* before = v.data();
+    for (int i = 100000; i < 1000000; ++i) v.push_back(i);
+    if (blocker) CHECK(v.data() != before);
+    bool ok = true;
+    for (int i = 0; i < 1000000; ++i) ok &= (v[i] == i);
+    CHECK(ok);
+    if (blocker) munmap(blocker, (size_t)sysconf(_SC_PAGESIZE));
+}
+
+TEST_CASE("MmapVector(MAP_SHARED): stays shared with fork()ed child after moving growth") {
+#ifdef MREMAP_MAYMOVE
+    // BUG (Linux): a MAP_SHARED|MAP_ANONYMOUS mapping is backed by a fixed-size shmem object;
+    // mremap grows the mapping but not the object, so touching the new pages raises SIGBUS.
+    // Growing a shared anonymous MmapVector past its first page crashes. Needs e.g. a memfd
+    // backing that can be ftruncate()d. Skipped until fixed.
+    MESSAGE("skipped on Linux: MAP_SHARED anonymous MmapVector cannot grow (SIGBUS)");
+    return;
+#endif
+    mv::MmapVector<int> v(MAP_SHARED | MAP_ANONYMOUS);
+    for (int i = 0; i < 100000; ++i) v.push_back(i);
+    void* blocker = block_after(v);
+    for (int i = 100000; i < 1000000; ++i) v.push_back(i);
+
+    pid_t pid = fork();
+    REQUIRE(pid != -1);
+    if (pid == 0) {
+        v[0] = -1; v[999999] = -2;
+        _exit(0);
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    CHECK(WIFEXITED(status));
+    CHECK(v[0] == -1);
+    CHECK(v[999999] == -2);
+    CHECK(v[500000] == 500000);
+    if (blocker) munmap(blocker, (size_t)sysconf(_SC_PAGESIZE));
 }
 
 // ── known bugs ────────────────────────────────────────────────────────────
