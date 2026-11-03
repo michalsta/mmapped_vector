@@ -36,7 +36,8 @@
 namespace mmapped_vector {
 
 
-static const size_t page_size = getpagesize();
+// Initialised once per program (C++17 inline variable), not once per translation unit.
+inline const size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
 
 template <typename T, typename AllocatorType, bool thread_safe>
 class MmappedVector;
