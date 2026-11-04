@@ -135,6 +135,11 @@ public:
     // Reduces memory usage by freeing unused memory
     void shrink_to_fit();
 
+    // MmapFileVector: writes the element count to the file, unmaps and closes it, and throws
+    // if any of that failed. Afterwards the vector is empty and cannot grow. The destructor
+    // does the same but ignores errors; call close() to find out about them.
+    void close() requires requires (AllocatorType& a) { a.close(); };
+
     // Returns pointer to the underlying array
     T* data();
     const T* data() const;
@@ -202,6 +207,15 @@ MmappedVector<T, AllocatorType, thread_safe>& MmappedVector<T, AllocatorType, th
 
 template <typename T, typename AllocatorType, bool thread_safe>
 MmappedVector<T, AllocatorType, thread_safe>::~MmappedVector() { allocator.sync(this->element_count); };
+
+template <typename T, typename AllocatorType, bool thread_safe>
+void MmappedVector<T, AllocatorType, thread_safe>::close() requires requires (AllocatorType& a) { a.close(); } {
+    change_capacity([&] {
+        allocator.sync(element_count);
+        element_count = 0;
+        allocator.close();
+    });
+};
 
 template <typename T, typename AllocatorType, bool thread_safe> inline
 const T& MmappedVector<T, AllocatorType, thread_safe>::operator[](size_t index) const {
@@ -313,8 +327,11 @@ template <typename F> inline
 void MmappedVector<T, AllocatorType, thread_safe>::change_capacity(F&& f) {
     if constexpr(thread_safe) {
         std::lock_guard<std::mutex> lock(mutex);
+        struct Publish {  // republish even if f() throws after changing the capacity
+            MmappedVector& v;
+            ~Publish() { v.capacity_atomic.store(v.allocator.get_capacity(), MEMORY_ORDER_REL); }
+        } publish{*this};
         f();
-        capacity_atomic.store(allocator.get_capacity(), MEMORY_ORDER_REL);
     } else {
         f();
     }

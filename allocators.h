@@ -291,10 +291,15 @@ public:
     size_t get_backing_size() const override;
     void sync(size_t used_elements) override;
 
+    // Unmaps the file, truncates it to the synced element count and closes it. Always releases
+    // everything; throws std::runtime_error afterwards if any step failed. The destructor does
+    // the same but ignores errors. A closed allocator cannot grow (std::logic_error).
+    void close();
+
     friend class MmappedVector<T, MmapFileAllocator, false>;
     friend class MmappedVector<T, MmapFileAllocator, true>;
 private:
-    void self_close();
+    void close_noexcept() noexcept;
     std::string file_name;
     int file_descriptor;
     int mmap_flags;
@@ -359,7 +364,7 @@ MmapFileAllocator<T>::MmapFileAllocator(MmapFileAllocator&& other) noexcept : Al
 template <typename T>
 MmapFileAllocator<T>& MmapFileAllocator<T>::operator=(MmapFileAllocator&& other) noexcept {
     if (this != &other) {
-        self_close();
+        close_noexcept();
         this->ptr = other.ptr;
         this->capacity = other.capacity;
         this->backing_size = other.backing_size;
@@ -375,12 +380,32 @@ MmapFileAllocator<T>& MmapFileAllocator<T>::operator=(MmapFileAllocator&& other)
 }
 
 template <typename T>
-void MmapFileAllocator<T>::self_close() {
-    if (this->file_descriptor == -1) return;  // moved-from
-    this->resize(this->get_backing_size());   // truncate the file to the actual size (may be 0)
+void MmapFileAllocator<T>::close() {
+    if (this->file_descriptor == -1) return;  // moved-from or already closed
+    // Unmap before truncating: nothing gets remapped, and data written through a MAP_SHARED
+    // mapping stays in the page cache after munmap.
+    std::string error;
+    if (this->ptr && munmap(this->ptr, this->capacity * sizeof(T)) == -1)
+        error = mmapped_vector::get_error_message("munmap");
+    if (ftruncate(this->file_descriptor, this->backing_size * sizeof(T)) == -1 && error.empty())
+        error = mmapped_vector::get_error_message("ftruncate");
+    if (::close(this->file_descriptor) == -1 && error.empty())
+        error = mmapped_vector::get_error_message("close");
+    this->file_descriptor = -1;
+    this->ptr = nullptr;
+    this->backing_size = 0;
+    this->capacity = 0;
+    if (!error.empty())
+        throw std::runtime_error("MmapFileAllocator::close: " + this->file_name + ": " + error);
+}
+
+template <typename T>
+void MmapFileAllocator<T>::close_noexcept() noexcept {
+    if (this->file_descriptor == -1) return;
     if (this->ptr)
         munmap(this->ptr, this->capacity * sizeof(T));
-    close(this->file_descriptor);
+    (void)ftruncate(this->file_descriptor, this->backing_size * sizeof(T));
+    ::close(this->file_descriptor);
     this->file_descriptor = -1;
     this->ptr = nullptr;
     this->backing_size = 0;
@@ -390,12 +415,14 @@ void MmapFileAllocator<T>::self_close() {
 
 template <typename T>
 MmapFileAllocator<T>::~MmapFileAllocator() {
-    self_close();
+    close_noexcept();
 }
 
 template <typename T>
 void MmapFileAllocator<T>::resize(size_t new_capacity) {
     if (new_capacity == this->capacity) return;
+    if (this->file_descriptor == -1)
+        throw std::logic_error("MmapFileAllocator::resize: the file is closed");
 
     if (ftruncate(this->file_descriptor, new_capacity * sizeof(T)) == -1)
         throw std::runtime_error("MmapFileAllocator::resize: ftruncate failed: " + mmapped_vector::get_error_message("ftruncate"));

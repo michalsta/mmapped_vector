@@ -433,6 +433,64 @@ static void concurrent_push(V& v, int n_threads, int per_thread, int base) {
     for (auto& t : threads) t.join();
 }
 
+TEST_CASE("MmapFileVector: close() persists, then the vector is empty and cannot grow") {
+    TempFile f{unique_tmp()};
+    mv::MmapFileVector<int> v(f, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+    for (int i = 0; i < 1000; ++i) v.push_back(i);
+    CHECK_NOTHROW(v.close());
+    CHECK(std::filesystem::file_size(f.path) == 1000 * sizeof(int));
+    CHECK(v.size() == 0);
+    CHECK(v.capacity() == 0);
+    CHECK(v.data() == nullptr);
+    CHECK_NOTHROW(v.close());  // second close: no-op
+    CHECK_THROWS_AS(v.push_back(1), std::logic_error);
+    CHECK(v.size() == 0);
+    {
+        mv::MmapFileVector<int> w(f);
+        REQUIRE(w.size() == 1000);
+        CHECK(w[999] == 999);
+    }
+    CHECK(std::filesystem::file_size(f.path) == 1000 * sizeof(int));
+}
+
+TEST_CASE("MmapFileVector: close() reports errors, the destructor swallows them") {
+    // A read-only file mapped MAP_PRIVATE can be written in memory but not truncated.
+    TempFile f{unique_tmp()};
+    {
+        mv::MmapFileVector<int> v(f, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        for (int i = 0; i < 32; ++i) v.push_back(i);
+    }
+    REQUIRE(std::filesystem::file_size(f.path) == 32 * sizeof(int));
+    {
+        mv::MmapFileVector<int> v(f, MAP_PRIVATE, O_RDONLY);
+        REQUIRE(v.size() == 32);
+        for (int i = 0; i < 12; ++i) v.pop_back();
+        CHECK_THROWS_AS(v.close(), std::runtime_error);
+        CHECK(v.size() == 0);  // released anyway
+        CHECK(v.data() == nullptr);
+    }
+    {
+        mv::MmapFileVector<int> v(f, MAP_PRIVATE, O_RDONLY);
+        v.pop_back();
+    }   // the same failure in the destructor must not terminate
+    CHECK(std::filesystem::file_size(f.path) == 32 * sizeof(int));
+}
+
+TEST_CASE("MmappedVector<MmapFileAllocator, thread_safe>: close()") {
+    TempFile f{unique_tmp()};
+    {
+        mv::MmappedVector<int, mv::MmapFileAllocator<int>, true> v(f, MAP_SHARED, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        for (int i = 0; i < 100; ++i) v.push_back(i);
+        CHECK_NOTHROW(v.close());
+        CHECK(v.capacity() == 0);
+    }
+    CHECK(std::filesystem::file_size(f.path) == 100 * sizeof(int));
+}
+
+template <typename V> concept Closable = requires(V v) { v.close(); };
+static_assert(Closable<mv::MmapFileVector<int>>);
+static_assert(!Closable<mv::MmapVector<int>>, "close() is only for file vectors");
+
 TEST_CASE("MmappedVector<thread_safe>: capacity changes are seen by the push_back fast path") {
     SUBCASE("shrink_to_fit then push") {
         TSVec v;
